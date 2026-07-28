@@ -162,38 +162,24 @@
       height: 180
     });
 
-    const MUTE_BUTTON_SPAWN_BLOCK_RECT = Object.freeze({
+    const GAME_CONTROL_SPAWN_BLOCK_RECT = Object.freeze({
       x: 0,
       y: 0,
-      width: 520,
-      height: 205
+      width: 190,
+      height: 180
     });
 
     const HINT_BUTTON_RECT = Object.freeze({
-      x: 174,
+      x: 24,
       y: 22,
       width: 136,
       height: 104
     });
 
     const HINT_BUTTON_HIT_RECT = Object.freeze({
-      x: 168,
+      x: 0,
       y: 0,
-      width: 149,
-      height: 180
-    });
-
-    const RESTART_BUTTON_RECT = Object.freeze({
-      x: 324,
-      y: 22,
-      width: 136,
-      height: 104
-    });
-
-    const RESTART_BUTTON_HIT_RECT = Object.freeze({
-      x: 318,
-      y: 0,
-      width: 160,
+      width: 167,
       height: 180
     });
 
@@ -1488,7 +1474,7 @@
 
       if (
         rectanglesOverlap(candidateRect, HUD_RECT) ||
-        rectanglesOverlap(candidateRect, MUTE_BUTTON_SPAWN_BLOCK_RECT)
+        rectanglesOverlap(candidateRect, GAME_CONTROL_SPAWN_BLOCK_RECT)
       ) {
         return false;
       }
@@ -2172,26 +2158,26 @@
         HUD_RECT.height,
         24
       );
-      ctx.fillStyle = 'rgba(20, 28, 24, 0.68)';
+      ctx.fillStyle = 'rgba(20, 28, 24, 0.44)';
       ctx.fill();
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = 'rgba(241, 255, 88, 0.58)';
+      ctx.strokeStyle = 'rgba(241, 255, 88, 0.42)';
       ctx.stroke();
 
-      const iconBox = 30;
-      const sourceRatio = images.pear.naturalWidth / images.pear.naturalHeight;
-      let iconWidth = iconBox;
-      let iconHeight = iconBox;
-
-      if (sourceRatio >= 1) {
-        iconHeight = iconBox / sourceRatio;
-      } else {
-        iconWidth = iconBox * sourceRatio;
-      }
-
+      const iconMaxWidth = 34;
+      const iconMaxHeight = 48;
+      const sourceWidth = images.pearColor.naturalWidth;
+      const sourceHeight = images.pearColor.naturalHeight;
+      const iconScale = Math.min(
+        iconMaxWidth / sourceWidth,
+        iconMaxHeight / sourceHeight
+      );
+      const iconWidth = sourceWidth * iconScale;
+      const iconHeight = sourceHeight * iconScale;
       const iconCenterX = HUD_RECT.x + 40;
+
       ctx.drawImage(
-        images.pear,
+        images.pearColor,
         iconCenterX - iconWidth / 2,
         centerY - iconHeight / 2,
         iconWidth,
@@ -2852,6 +2838,10 @@
     }
 
     function drawMuteButton() {
+      if (state !== STATE_START) {
+        return;
+      }
+
       const rect = MUTE_BUTTON_RECT;
       const muted = audioController.isEffectivelyMuted;
 
@@ -2991,86 +2981,41 @@
       context.restore();
     }
 
-    function drawRestartIcon(context, centerX, centerY, size, disabled) {
-      const color = disabled ? '#99998d' : '#fff6b3';
-
-      context.save();
-      context.strokeStyle = color;
-      context.fillStyle = color;
-      context.lineWidth = Math.max(5, size * 0.09);
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      context.shadowColor = disabled ? 'transparent' : 'rgba(255, 214, 72, 0.65)';
-      context.shadowBlur = disabled ? 0 : 10;
-      context.beginPath();
-      context.arc(
-        centerX,
-        centerY,
-        size * 0.31,
-        -Math.PI * 0.85,
-        Math.PI * 0.72
-      );
-      context.stroke();
-      context.beginPath();
-      context.moveTo(centerX - size * 0.38, centerY - size * 0.21);
-      context.lineTo(centerX - size * 0.13, centerY - size * 0.25);
-      context.lineTo(centerX - size * 0.24, centerY - size * 0.02);
-      context.closePath();
-      context.fill();
-      context.restore();
-    }
-
     function drawGameControlButtons(now) {
       if (state !== STATE_GAME) {
         return;
       }
 
       const hintDisabled = victoryPending || now < hintCooldownUntil;
-      const controls = [
-        { rect: HINT_BUTTON_RECT, kind: 'hint', disabled: hintDisabled },
-        { rect: RESTART_BUTTON_RECT, kind: 'restart', disabled: victoryPending }
-      ];
+      const rect = HINT_BUTTON_RECT;
 
-      for (const control of controls) {
-        const rect = control.rect;
-        hudCtx.save();
-        drawRoundedRect(
-          hudCtx,
-          rect.x,
-          rect.y,
-          rect.width,
-          rect.height,
-          26
-        );
-        hudCtx.fillStyle = control.disabled
-          ? 'rgba(18, 23, 21, 0.52)'
-          : 'rgba(18, 23, 21, 0.68)';
-        hudCtx.fill();
-        hudCtx.lineWidth = 3;
-        hudCtx.strokeStyle = control.disabled
-          ? 'rgba(190, 190, 175, 0.4)'
-          : 'rgba(255, 245, 166, 0.72)';
-        hudCtx.stroke();
-        hudCtx.restore();
+      hudCtx.save();
+      drawRoundedRect(
+        hudCtx,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        26
+      );
+      hudCtx.fillStyle = hintDisabled
+        ? 'rgba(18, 23, 21, 0.52)'
+        : 'rgba(18, 23, 21, 0.68)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = hintDisabled
+        ? 'rgba(190, 190, 175, 0.4)'
+        : 'rgba(255, 245, 166, 0.72)';
+      hudCtx.stroke();
+      hudCtx.restore();
 
-        if (control.kind === 'hint') {
-          drawBulbIcon(
-            hudCtx,
-            rect.x + rect.width / 2,
-            rect.y + rect.height / 2 - 2,
-            72,
-            control.disabled
-          );
-        } else {
-          drawRestartIcon(
-            hudCtx,
-            rect.x + rect.width / 2,
-            rect.y + rect.height / 2,
-            74,
-            control.disabled
-          );
-        }
-      }
+      drawBulbIcon(
+        hudCtx,
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2 - 2,
+        72,
+        hintDisabled
+      );
 
       if (now < hintCooldownUntil) {
         const rect = HINT_BUTTON_RECT;
@@ -3116,13 +3061,19 @@
       hudCtx.clearRect(0, 0, audioHudCanvas.width, audioHudCanvas.height);
       hudCtx.restore();
 
-      drawMuteButton();
+      if (state === STATE_START) {
+        drawMuteButton();
+      }
       drawGameControlButtons(now);
       drawStartBestTime();
       drawVolumePopup(now);
     }
 
     function pointIsInsideMuteButton(point) {
+      if (state !== STATE_START) {
+        return false;
+      }
+
       return (
         point.x >= MUTE_BUTTON_HIT_RECT.x &&
         point.x <= MUTE_BUTTON_HIT_RECT.x + MUTE_BUTTON_HIT_RECT.width &&
@@ -3564,12 +3515,6 @@
           return;
         }
 
-        if (pointIsInsideRect(point, RESTART_BUTTON_HIT_RECT)) {
-          if (!victoryPending) {
-            beginRestartRound();
-          }
-          return;
-        }
       }
 
       const isTouchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
