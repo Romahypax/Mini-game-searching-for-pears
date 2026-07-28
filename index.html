@@ -100,12 +100,17 @@
     const MIN_CENTER_DISTANCE = 200;
     const POSITION_ATTEMPTS = 1000;
     const LAYOUT_ATTEMPTS = 25;
-    const ALPHA_THRESHOLD = 24;
-    const ALPHA_MASK_MAX_SIDE = 512;
 
     const EFFECT_DURATION = 500;
     const POP_DURATION = 320;
     const VICTORY_DELAY = 580;
+    const FIREWORK_SPAWN_INTERVAL = 1050;
+    const FIREWORK_PARTICLE_DURATION = 1050;
+    const FIREWORK_INITIAL_BURSTS = 3;
+    const FIREWORK_SEQUENCE_DURATION = 6200;
+    const FIREWORK_PARTICLES_PER_BURST = 18;
+    const FIREWORK_MAX_PARTICLES = 72;
+    const FIREWORK_MAX_RINGS = 5;
     const IMAGE_LOAD_TIMEOUT = 15000;
 
     const DEFAULT_GLOBAL_VOLUME = 0.7;
@@ -114,9 +119,34 @@
     const VOLUME_HUD_FADE_DURATION = 450;
     const VOLUME_SWIPE_ZONE_RATIO = 0.15;
     const VOLUME_SWIPE_TRAVEL_RATIO = 0.6;
-    const VOLUME_SWIPE_THRESHOLD = 12;
+    const VOLUME_SWIPE_THRESHOLD = 24;
+    const VOLUME_SWIPE_AXIS_RATIO = 1.2;
     const MUSIC_FADE_OUT_DURATION = 800;
     const AUDIO_LOAD_TIMEOUT = 12000;
+
+    const BEST_TIME_STORAGE_KEY = 'pear_game_best_time';
+    const MISS_PENALTY_MS = 3000;
+    const PENALTY_TEXT_DURATION = 1000;
+    const PENALTY_TEXT_MAX_COUNT = 8;
+    const HINT_COOLDOWN_MS = 15000;
+    const HINT_EFFECT_DURATION = 1500;
+    const FIREWORK_MAX_SPAWNS_PER_FRAME = 1;
+    const FIREWORK_RESUME_DELAY = 260;
+
+    // Перезапуск выполняется через настоящий двухкадровый blackout:
+    // сначала браузер успевает показать непрозрачную шторку, затем под ней
+    // создаётся новая раскладка. Финальное открытие происходит мгновенным срезом,
+    // чтобы игрок не видел, как все груши одновременно проявляются из затемнения.
+    const RESTART_MIN_COVER_DURATION = 560;
+    const RESTART_POST_LAYOUT_HOLD = 120;
+    const RESTART_FAILURE_HOLD = 900;
+
+    const SFX_MIN_INTERVALS = Object.freeze({
+      button: 90,
+      pear: 70,
+      miss: 130,
+      complete: 500
+    });
 
     const MUTE_BUTTON_RECT = Object.freeze({
       x: 24,
@@ -128,26 +158,55 @@
     const MUTE_BUTTON_HIT_RECT = Object.freeze({
       x: 0,
       y: 0,
-      width: 220,
+      width: 167,
       height: 180
     });
 
     const MUTE_BUTTON_SPAWN_BLOCK_RECT = Object.freeze({
       x: 0,
       y: 0,
-      width: 250,
+      width: 520,
       height: 205
+    });
+
+    const HINT_BUTTON_RECT = Object.freeze({
+      x: 174,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const HINT_BUTTON_HIT_RECT = Object.freeze({
+      x: 168,
+      y: 0,
+      width: 149,
+      height: 180
+    });
+
+    const RESTART_BUTTON_RECT = Object.freeze({
+      x: 324,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const RESTART_BUTTON_HIT_RECT = Object.freeze({
+      x: 318,
+      y: 0,
+      width: 160,
+      height: 180
     });
 
     const STATE_START = 'STATE_START';
     const STATE_GAME = 'STATE_GAME';
+    const STATE_RESTARTING = 'STATE_RESTARTING';
     const STATE_END = 'STATE_END';
 
     const HUD_RECT = Object.freeze({
-      x: LOGICAL_WIDTH - 360,
+      x: LOGICAL_WIDTH - 560,
       y: 18,
-      width: 326,
-      height: 74
+      width: 526,
+      height: 82
     });
 
     const canvas = document.getElementById('gameCanvas');
@@ -187,6 +246,7 @@
       levelMusic: encodeURI('levelmusic.mp3'),
       soundButton: encodeURI('soundButton.mp3'),
       soundPearClick: encodeURI('soundPearClick.mp3'),
+      soundMiss: encodeURI('soundMiss.mp3'),
       soundLevelComplete: encodeURI('soundLevelComplete.mp3')
     });
 
@@ -197,7 +257,11 @@
     let pears = [];
     let particles = [];
     let bursts = [];
-    let pearAlphaMask = null;
+    let celebrationParticles = [];
+    let celebrationRings = [];
+    let celebrationStartedAt = 0;
+    let nextFireworkAt = 0;
+    let blurredEndBackgroundCanvas = null;
 
     let assetsReady = false;
     let isPreloading = false;
@@ -209,14 +273,60 @@
 
     let timerStartedAt = 0;
     let finalElapsed = 0;
+    let penaltyMilliseconds = 0;
+    let penaltyTexts = [];
+    let bestTime = loadBestTime();
+    let isNewRecord = false;
     let victoryPending = false;
     let victoryTransitionAt = 0;
+    let hintCooldownUntil = 0;
+    let hintedPearId = null;
+    let hintEffectUntil = 0;
+    let usedHintThisRound = false;
 
     let volumeHudVisibleUntil = 0;
     let volumeGesture = null;
+    let pageHiddenAt = 0;
+
+    let restartTransitionStartedAt = 0;
+    let restartPausedRoundAt = 0;
+    let restartCoverPresented = false;
+    let restartLayoutPreparing = false;
+    let restartLayoutPrepared = false;
+    let restartRevealAt = 0;
+    let restartFailureMessage = '';
+    let restartFailureReturnAt = 0;
 
     function clamp(value, minimum, maximum) {
       return Math.min(maximum, Math.max(minimum, value));
+    }
+
+    function loadBestTime() {
+      try {
+        const stored = Number.parseInt(
+          window.localStorage.getItem(BEST_TIME_STORAGE_KEY),
+          10
+        );
+
+        if (Number.isFinite(stored) && stored >= 0) {
+          return stored;
+        }
+      } catch {
+        // Игра продолжает работать без localStorage.
+      }
+
+      return null;
+    }
+
+    function saveBestTime(value) {
+      try {
+        window.localStorage.setItem(
+          BEST_TIME_STORAGE_KEY,
+          String(Math.max(0, Math.floor(value)))
+        );
+      } catch {
+        // Рекорд остаётся доступен в текущей вкладке.
+      }
     }
 
     class AudioController {
@@ -229,6 +339,7 @@
         this.sfx = {
           button: null,
           pear: null,
+          miss: null,
           complete: null
         };
         this.musicFadeFactors = {
@@ -236,6 +347,7 @@
           level: 1
         };
         this.activeSfx = new Set();
+        this.lastSfxPlayedAt = Object.create(null);
         this.audioContext = null;
         this.unlocked = false;
         this.pageSuspended = false;
@@ -315,6 +427,12 @@
           this.loadOptionalAudio(this.files.soundPearClick, false)
             .then(audio => {
               this.sfx.pear = audio;
+            })
+            .catch(() => null),
+
+          this.loadOptionalAudio(this.files.soundMiss, false)
+            .then(audio => {
+              this.sfx.miss = audio;
             })
             .catch(() => null),
 
@@ -769,6 +887,15 @@
           return;
         }
 
+        const now = performance.now();
+        const minimumInterval = SFX_MIN_INTERVALS[name] ?? 0;
+        const lastPlayedAt = this.lastSfxPlayedAt[name] ?? -Infinity;
+
+        if (now - lastPlayedAt < minimumInterval) {
+          return;
+        }
+
+        this.lastSfxPlayedAt[name] = now;
         const source = this.sfx[name];
 
         if (!source) {
@@ -829,12 +956,35 @@
             const now = audioContext.currentTime;
 
             if (name === 'complete') {
-              this.playSynthTone(523.25, 659.25, now, 0.16, 'sine', 0.12);
-              this.playSynthTone(659.25, 783.99, now + 0.11, 0.18, 'sine', 0.11);
-              this.playSynthTone(783.99, 1046.5, now + 0.23, 0.28, 'triangle', 0.1);
+              const melody = [
+                { frequency: 523.25, delay: 0, duration: 0.15, gain: 0.105 },
+                { frequency: 659.25, delay: 0.12, duration: 0.15, gain: 0.105 },
+                { frequency: 783.99, delay: 0.24, duration: 0.18, gain: 0.11 },
+                { frequency: 1046.5, delay: 0.39, duration: 0.28, gain: 0.115 }
+              ];
+
+              for (const note of melody) {
+                this.playSynthTone(
+                  note.frequency * 0.985,
+                  note.frequency,
+                  now + note.delay,
+                  note.duration,
+                  'triangle',
+                  note.gain
+                );
+              }
+
+              const chordStart = now + 0.62;
+              this.playSynthTone(1046.5, 1058, chordStart, 0.48, 'sine', 0.085);
+              this.playSynthTone(1318.51, 1330, chordStart, 0.48, 'sine', 0.065);
+              this.playSynthTone(1567.98, 1580, chordStart, 0.48, 'triangle', 0.055);
             } else if (name === 'pear') {
-              this.playSynthTone(660, 920, now, 0.13, 'sine', 0.11);
-              this.playSynthTone(990, 1180, now + 0.035, 0.09, 'triangle', 0.055);
+              this.playSynthTone(784, 1174.66, now, 0.17, 'sine', 0.09);
+              this.playSynthTone(1567.98, 1318.51, now + 0.028, 0.24, 'triangle', 0.045);
+              this.playSynthTone(2349.32, 2093, now + 0.045, 0.16, 'sine', 0.025);
+            } else if (name === 'miss') {
+              this.playSynthTone(235, 170, now, 0.17, 'sine', 0.075);
+              this.playSynthTone(117.5, 102, now + 0.015, 0.14, 'triangle', 0.035);
             } else {
               this.playSynthTone(360, 480, now, 0.09, 'sine', 0.08);
             }
@@ -1141,59 +1291,6 @@
       }
     }
 
-    function createAlphaMask(image) {
-      try {
-        const sourceWidth = image.naturalWidth;
-        const sourceHeight = image.naturalHeight;
-        const scale = Math.min(
-          1,
-          ALPHA_MASK_MAX_SIDE / Math.max(sourceWidth, sourceHeight)
-        );
-
-        const maskWidth = Math.max(1, Math.round(sourceWidth * scale));
-        const maskHeight = Math.max(1, Math.round(sourceHeight * scale));
-        const maskCanvas = document.createElement('canvas');
-        const maskContext = maskCanvas.getContext('2d', {
-          willReadFrequently: true
-        });
-
-        if (!maskContext) {
-          return null;
-        }
-
-        maskCanvas.width = maskWidth;
-        maskCanvas.height = maskHeight;
-        maskContext.imageSmoothingEnabled = true;
-        maskContext.imageSmoothingQuality = 'high';
-        maskContext.clearRect(0, 0, maskWidth, maskHeight);
-        maskContext.drawImage(image, 0, 0, maskWidth, maskHeight);
-
-        const rgba = maskContext.getImageData(
-          0,
-          0,
-          maskWidth,
-          maskHeight
-        ).data;
-
-        const alpha = new Uint8Array(maskWidth * maskHeight);
-
-        for (let pixel = 0; pixel < alpha.length; pixel += 1) {
-          alpha[pixel] = rgba[pixel * 4 + 3];
-        }
-
-        return {
-          width: maskWidth,
-          height: maskHeight,
-          alpha
-        };
-      } catch (error) {
-        console.warn(
-          'Pixel-perfect hit detection недоступен, используется эллиптический хитбокс.',
-          error
-        );
-        return null;
-      }
-    }
 
     async function preloadAssets() {
       if (isPreloading) {
@@ -1206,7 +1303,7 @@
       loadErrors = [];
       startAssetSource = '';
       startAssetIsGif = false;
-      pearAlphaMask = null;
+      blurredEndBackgroundCanvas = null;
       setStartScreenVisible(false);
       startScreen.removeAttribute('src');
 
@@ -1256,7 +1353,7 @@
         }
 
         validateAssets();
-        pearAlphaMask = createAlphaMask(images.pear);
+        createBlurredEndBackgroundCache();
         resetRunData();
         assetsReady = true;
         state = STATE_START;
@@ -1527,15 +1624,14 @@
       return result;
     }
 
-    function spawnPears() {
+    function createPearLayout() {
       const size = getPearSize();
 
       for (let layoutAttempt = 0; layoutAttempt < LAYOUT_ATTEMPTS; layoutAttempt += 1) {
         const layout = tryCreateRandomLayout(size.width, size.height);
 
         if (layout) {
-          pears = layout;
-          return;
+          return layout;
         }
       }
 
@@ -1552,7 +1648,7 @@
         throw new Error('Не удалось создать безопасную расстановку предметов.');
       }
 
-      pears = fallbackLayout;
+      return fallbackLayout;
     }
 
     function setStartScreenVisible(visible) {
@@ -1570,14 +1666,37 @@
       );
     }
 
+    function clearRestartTransition() {
+      restartTransitionStartedAt = 0;
+      restartPausedRoundAt = 0;
+      restartCoverPresented = false;
+      restartLayoutPreparing = false;
+      restartLayoutPrepared = false;
+      restartRevealAt = 0;
+      restartFailureMessage = '';
+      restartFailureReturnAt = 0;
+    }
+
     function resetRunData() {
       pears = [];
       particles = [];
       bursts = [];
+      penaltyTexts = [];
+      celebrationParticles = [];
+      celebrationRings = [];
+      celebrationStartedAt = 0;
+      nextFireworkAt = 0;
       timerStartedAt = 0;
       finalElapsed = 0;
+      penaltyMilliseconds = 0;
+      isNewRecord = false;
       victoryPending = false;
       victoryTransitionAt = 0;
+      hintCooldownUntil = 0;
+      hintedPearId = null;
+      hintEffectUntil = 0;
+      usedHintThisRound = false;
+      pageHiddenAt = 0;
     }
 
     function focusCanvas() {
@@ -1589,8 +1708,20 @@
     }
 
     function startGame() {
+      clearRestartTransition();
+
+      let layout;
+
+      try {
+        layout = createPearLayout();
+      } catch (error) {
+        console.error('Не удалось начать раунд:', error);
+        audioController.playSfx('miss');
+        return;
+      }
+
       resetRunData();
-      spawnPears();
+      pears = layout;
       timerStartedAt = performance.now();
       state = STATE_GAME;
       syncStartScreenVisibility();
@@ -1599,27 +1730,172 @@
       focusCanvas();
     }
 
+    function beginRestartRound() {
+      if (state !== STATE_GAME || victoryPending) {
+        return;
+      }
+
+      const now = performance.now();
+      restartTransitionStartedAt = now;
+      restartPausedRoundAt = now;
+      restartCoverPresented = false;
+      restartLayoutPreparing = false;
+      restartLayoutPrepared = false;
+      restartRevealAt = 0;
+      restartFailureMessage = '';
+      restartFailureReturnAt = 0;
+      state = STATE_RESTARTING;
+
+      // Старый раунд пока не уничтожается. Если генерация неожиданно завершится
+      // ошибкой, можно безопасно вернуть игрока к прежней раскладке.
+      audioController.playSfx('button');
+      audioController.desiredMusic = 'level';
+      audioController.syncDesiredMusic();
+      focusCanvas();
+    }
+
+    function prepareRestartLayout(now) {
+      if (
+        restartLayoutPreparing ||
+        restartLayoutPrepared ||
+        restartFailureMessage
+      ) {
+        return;
+      }
+
+      restartLayoutPreparing = true;
+
+      try {
+        // Генерация транзакционная: глобальная раскладка меняется только после
+        // успешного получения всех десяти валидных позиций.
+        const layout = createPearLayout();
+        const transitionStartedAt = restartTransitionStartedAt;
+        const pausedRoundAt = restartPausedRoundAt;
+
+        resetRunData();
+        pears = layout;
+        timerStartedAt = 0;
+
+        restartTransitionStartedAt = transitionStartedAt;
+        restartPausedRoundAt = pausedRoundAt;
+        restartCoverPresented = true;
+        restartLayoutPreparing = false;
+        restartLayoutPrepared = true;
+        restartRevealAt = Math.max(
+          transitionStartedAt + RESTART_MIN_COVER_DURATION,
+          now + RESTART_POST_LAYOUT_HOLD
+        );
+      } catch (error) {
+        console.error('Не удалось обновить раскладку:', error);
+        restartLayoutPreparing = false;
+        restartFailureMessage = 'Не удалось обновить раскладку';
+        restartFailureReturnAt = now + RESTART_FAILURE_HOLD;
+        audioController.playSfx('miss');
+      }
+    }
+
+    function finishRestartTransition(now) {
+      timerStartedAt = now;
+      state = STATE_GAME;
+      clearRestartTransition();
+      focusCanvas();
+    }
+
+    function shiftActiveRoundTimestamps(pauseStartedAt, pauseDuration) {
+      if (pauseDuration <= 0) {
+        return;
+      }
+
+      if (timerStartedAt > 0) {
+        timerStartedAt += pauseDuration;
+      }
+
+      if (victoryPending && victoryTransitionAt > pauseStartedAt) {
+        victoryTransitionAt += pauseDuration;
+      }
+
+      if (hintCooldownUntil > pauseStartedAt) {
+        hintCooldownUntil += pauseDuration;
+      }
+
+      if (hintEffectUntil > pauseStartedAt) {
+        hintEffectUntil += pauseDuration;
+      }
+
+      for (const pear of pears) {
+        if (pear.foundAt > 0 && pear.foundAt + POP_DURATION > pauseStartedAt) {
+          pear.foundAt += pauseDuration;
+        }
+      }
+
+      for (const burst of bursts) {
+        if (burst.createdAt + burst.duration > pauseStartedAt) {
+          burst.createdAt += pauseDuration;
+        }
+      }
+
+      for (const particle of particles) {
+        if (particle.createdAt + particle.duration > pauseStartedAt) {
+          particle.createdAt += pauseDuration;
+        }
+      }
+
+      for (const penaltyText of penaltyTexts) {
+        if (penaltyText.createdAt + penaltyText.duration > pauseStartedAt) {
+          penaltyText.createdAt += pauseDuration;
+        }
+      }
+    }
+
+    function abortRestartTransition(now) {
+      const pauseDuration = Math.max(0, now - restartPausedRoundAt);
+      shiftActiveRoundTimestamps(restartPausedRoundAt, pauseDuration);
+      state = STATE_GAME;
+      clearRestartTransition();
+      focusCanvas();
+    }
+
     function scheduleVictory(now) {
       if (victoryPending) {
         return;
       }
 
-      finalElapsed = Math.max(0, now - timerStartedAt);
+      if (usedHintThisRound) {
+        finalElapsed = 0;
+        isNewRecord = false;
+      } else {
+        finalElapsed = Math.max(
+          0,
+          now - timerStartedAt + penaltyMilliseconds
+        );
+        isNewRecord = bestTime === null || finalElapsed < bestTime;
+
+        if (isNewRecord) {
+          bestTime = finalElapsed;
+          saveBestTime(bestTime);
+        }
+      }
+
       victoryPending = true;
       victoryTransitionAt = now + VICTORY_DELAY;
     }
 
     function completeVictoryTransition() {
+      const now = performance.now();
+
+      clearRestartTransition();
       pears = [];
       particles = [];
       bursts = [];
       victoryPending = false;
       victoryTransitionAt = 0;
       state = STATE_END;
+      initializeVictoryCelebration(now);
       syncStartScreenVisibility();
     }
 
     function returnToStart() {
+      clearRestartTransition();
       resetRunData();
       state = STATE_START;
       syncStartScreenVisibility();
@@ -1666,16 +1942,57 @@
       return 1 + Math.sin(progress * Math.PI) * 0.22 * (1 - progress * 0.25);
     }
 
+    function getHintScale(pear, now) {
+      if (
+        pear.isFound ||
+        pear.id !== hintedPearId ||
+        now >= hintEffectUntil
+      ) {
+        return 1;
+      }
+
+      const phase = (now / 170) * Math.PI;
+      return 1.08 + Math.sin(phase) * 0.1;
+    }
+
+    function drawHintHighlight(pear, now) {
+      if (
+        pear.isFound ||
+        pear.id !== hintedPearId ||
+        now >= hintEffectUntil
+      ) {
+        return;
+      }
+
+      const remaining = hintEffectUntil - now;
+      const fade = clamp(remaining / 260, 0, 1);
+      const pulse = 0.5 + 0.5 * Math.sin(now / 115);
+      const radius = Math.max(pear.width, pear.height) * (0.72 + pulse * 0.2);
+
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = '#fff36c';
+      ctx.lineWidth = 7 + pulse * 4;
+      ctx.shadowColor = '#fff36c';
+      ctx.shadowBlur = 28;
+      ctx.beginPath();
+      ctx.arc(pear.x, pear.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function drawPear(pear, now) {
       const image = pear.isFound ? images.pearColor : images.pear;
-      const popScale = getPopScale(pear, now);
+      const scale = getPopScale(pear, now) * getHintScale(pear, now);
+
+      drawHintHighlight(pear, now);
 
       ctx.save();
       ctx.translate(pear.x, pear.y);
       ctx.rotate(pear.angle);
       ctx.scale(
-        (pear.flipX ? -1 : 1) * popScale,
-        (pear.flipY ? -1 : 1) * popScale
+        (pear.flipX ? -1 : 1) * scale,
+        (pear.flipY ? -1 : 1) * scale
       );
       ctx.drawImage(
         image,
@@ -1821,50 +2138,637 @@
         return finalElapsed;
       }
 
-      return Math.max(0, now - timerStartedAt);
+      return Math.max(
+        0,
+        now - timerStartedAt + penaltyMilliseconds
+      );
     }
 
-    function drawGameTimer(now) {
-      const text = formatTime(getCurrentElapsed(now));
+    function getFoundCount() {
+      let count = 0;
 
-      ctx.save();
-      ctx.font = '700 34px Arial, Helvetica, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
+      for (const pear of pears) {
+        if (pear.isFound) {
+          count += 1;
+        }
+      }
 
-      const textWidth = ctx.measureText(text).width;
-      const right = HUD_RECT.x + HUD_RECT.width - 18;
+      return count;
+    }
+
+    function drawGameHud(now) {
+      const timeText = usedHintThisRound
+        ? 'Режим без таймера'
+        : formatTime(getCurrentElapsed(now));
+      const foundText = `${getFoundCount()} / ${PEAR_COUNT}`;
       const centerY = HUD_RECT.y + HUD_RECT.height / 2;
 
-      ctx.fillStyle = 'rgba(20, 28, 24, 0.62)';
-      ctx.fillRect(
-        right - textWidth - 24,
-        HUD_RECT.y + 9,
-        textWidth + 42,
-        HUD_RECT.height - 18
+      ctx.save();
+      drawRoundedRect(
+        ctx,
+        HUD_RECT.x,
+        HUD_RECT.y,
+        HUD_RECT.width,
+        HUD_RECT.height,
+        24
+      );
+      ctx.fillStyle = 'rgba(20, 28, 24, 0.68)';
+      ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(241, 255, 88, 0.58)';
+      ctx.stroke();
+
+      const iconBox = 30;
+      const sourceRatio = images.pear.naturalWidth / images.pear.naturalHeight;
+      let iconWidth = iconBox;
+      let iconHeight = iconBox;
+
+      if (sourceRatio >= 1) {
+        iconHeight = iconBox / sourceRatio;
+      } else {
+        iconWidth = iconBox * sourceRatio;
+      }
+
+      const iconCenterX = HUD_RECT.x + 40;
+      ctx.drawImage(
+        images.pear,
+        iconCenterX - iconWidth / 2,
+        centerY - iconHeight / 2,
+        iconWidth,
+        iconHeight
       );
 
-      ctx.shadowColor = 'rgba(238, 255, 92, 0.8)';
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = '#f1ff58';
-      ctx.fillText(text, right, centerY);
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.textAlign = 'left';
+      ctx.font = '800 34px Arial, Helvetica, sans-serif';
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.strokeText(foundText, HUD_RECT.x + 72, centerY + 1);
+      ctx.fillStyle = '#fff5a7';
+      ctx.fillText(foundText, HUD_RECT.x + 72, centerY + 1);
+
+      if (usedHintThisRound) {
+        const badgeWidth = 300;
+        const badgeHeight = 54;
+        const badgeX = HUD_RECT.x + HUD_RECT.width - badgeWidth - 12;
+        const badgeY = centerY - badgeHeight / 2;
+
+        drawRoundedRect(
+          ctx,
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          19
+        );
+        ctx.fillStyle = 'rgba(255, 230, 116, 0.9)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(86, 61, 18, 0.72)';
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.font = '800 27px Arial, Helvetica, sans-serif';
+        ctx.lineWidth = 0;
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#35270e';
+        ctx.fillText(
+          timeText,
+          badgeX + badgeWidth / 2,
+          centerY + 1
+        );
+      } else {
+        ctx.textAlign = 'right';
+        ctx.font = '800 36px Arial, Helvetica, sans-serif';
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.strokeText(
+          timeText,
+          HUD_RECT.x + HUD_RECT.width - 18,
+          centerY + 1
+        );
+        ctx.shadowColor = 'rgba(238, 255, 92, 0.78)';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#f1ff58';
+        ctx.fillText(
+          timeText,
+          HUD_RECT.x + HUD_RECT.width - 18,
+          centerY + 1
+        );
+      }
       ctx.restore();
     }
 
-    function drawFinalTime() {
-      const text = formatTime(finalElapsed);
+    function addPenaltyText(point, now) {
+      if (penaltyTexts.length >= PENALTY_TEXT_MAX_COUNT) {
+        penaltyTexts.splice(
+          0,
+          penaltyTexts.length - PENALTY_TEXT_MAX_COUNT + 1
+        );
+      }
+
+      penaltyTexts.push({
+        x: clamp(point.x, 120, LOGICAL_WIDTH - 120),
+        y: clamp(point.y, 90, LOGICAL_HEIGHT - 55),
+        createdAt: now,
+        duration: PENALTY_TEXT_DURATION
+      });
+    }
+
+    function drawPenaltyText(item, now) {
+      const progress = (now - item.createdAt) / item.duration;
+
+      if (progress < 0 || progress >= 1) {
+        return false;
+      }
+
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const y = item.y - eased * 78;
+      const alpha = 1 - progress;
 
       ctx.save();
-      ctx.font = '900 96px Arial, Helvetica, sans-serif';
+      ctx.globalAlpha = alpha;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '900 42px Arial, Helvetica, sans-serif';
+      ctx.lineWidth = 9;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(55, 0, 0, 0.88)';
+      ctx.strokeText('+3 сек!', item.x, y);
+      ctx.fillStyle = '#ff5555';
+      ctx.shadowColor = 'rgba(255, 40, 40, 0.72)';
+      ctx.shadowBlur = 14;
+      ctx.fillText('+3 сек!', item.x, y);
+      ctx.restore();
+      return true;
+    }
+
+    function drawPenaltyTexts(now) {
+      penaltyTexts = penaltyTexts.filter(item => drawPenaltyText(item, now));
+    }
+
+    const FIREWORK_COLORS = Object.freeze([
+      '#ffd45a',
+      '#fff3ad',
+      '#ff8bbd',
+      '#8fe9ff',
+      '#a8ff9c',
+      '#d6a3ff'
+    ]);
+
+    function trimCelebrationObjects() {
+      if (celebrationParticles.length > FIREWORK_MAX_PARTICLES) {
+        celebrationParticles.splice(
+          0,
+          celebrationParticles.length - FIREWORK_MAX_PARTICLES
+        );
+      }
+
+      if (celebrationRings.length > FIREWORK_MAX_RINGS) {
+        celebrationRings.splice(
+          0,
+          celebrationRings.length - FIREWORK_MAX_RINGS
+        );
+      }
+    }
+
+    function spawnVictoryFirework(createdAt, x = null, y = null) {
+      const centerX = x ?? randomRange(
+        LOGICAL_WIDTH * 0.34,
+        LOGICAL_WIDTH * 0.66
+      );
+      const centerY = y ?? randomRange(
+        LOGICAL_HEIGHT * 0.22,
+        LOGICAL_HEIGHT * 0.58
+      );
+      const color = FIREWORK_COLORS[
+        Math.floor(Math.random() * FIREWORK_COLORS.length)
+      ];
+      const remainingSlots = Math.max(
+        0,
+        FIREWORK_MAX_PARTICLES - celebrationParticles.length
+      );
+      const particleCount = Math.min(
+        FIREWORK_PARTICLES_PER_BURST,
+        remainingSlots
+      );
+
+      if (particleCount <= 0) {
+        return;
+      }
+
+      const rotationOffset = randomRange(0, Math.PI * 2);
+
+      celebrationRings.push({
+        x: centerX,
+        y: centerY,
+        color,
+        createdAt,
+        duration: 520
+      });
+
+      for (let index = 0; index < particleCount; index += 1) {
+        const direction =
+          rotationOffset +
+          index / particleCount * Math.PI * 2 +
+          randomRange(-0.075, 0.075);
+        const speed = randomRange(165, 335);
+        const lifeScale = randomRange(0.86, 1.08);
+
+        celebrationParticles.push({
+          x: centerX,
+          y: centerY,
+          velocityX: Math.cos(direction) * speed,
+          velocityY: Math.sin(direction) * speed,
+          gravity: randomRange(110, 165),
+          size: randomRange(2.6, 5.2),
+          color,
+          createdAt,
+          duration: FIREWORK_PARTICLE_DURATION * lifeScale,
+          twinkleOffset: randomRange(0, Math.PI * 2)
+        });
+      }
+
+      trimCelebrationObjects();
+    }
+
+    function initializeVictoryCelebration(now) {
+      celebrationParticles = [];
+      celebrationRings = [];
+      celebrationStartedAt = now;
+      nextFireworkAt = now + 1450;
+
+      const initialBursts = [
+        { x: LOGICAL_WIDTH * 0.38, y: LOGICAL_HEIGHT * 0.36, delay: 0 },
+        { x: LOGICAL_WIDTH * 0.62, y: LOGICAL_HEIGHT * 0.32, delay: 180 },
+        { x: LOGICAL_WIDTH * 0.5, y: LOGICAL_HEIGHT * 0.22, delay: 380 }
+      ];
+
+      for (
+        let index = 0;
+        index < Math.min(FIREWORK_INITIAL_BURSTS, initialBursts.length);
+        index += 1
+      ) {
+        const burst = initialBursts[index];
+
+        spawnVictoryFirework(
+          now + burst.delay,
+          burst.x,
+          burst.y
+        );
+      }
+    }
+
+    function drawVictoryRing(ring, now) {
+      const progress = (now - ring.createdAt) / ring.duration;
+
+      if (progress < 0) {
+        return true;
+      }
+
+      if (progress >= 1) {
+        return false;
+      }
+
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const radius = 18 + eased * 70;
+
+      ctx.globalAlpha = (1 - progress) * 0.72;
+      ctx.strokeStyle = ring.color;
+      ctx.lineWidth = 5.5 * (1 - progress) + 1.2;
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      return true;
+    }
+
+    function drawVictoryParticle(particle, now) {
+      const ageMilliseconds = now - particle.createdAt;
+
+      if (ageMilliseconds < 0) {
+        return true;
+      }
+
+      const progress = ageMilliseconds / particle.duration;
+
+      if (progress >= 1) {
+        return false;
+      }
+
+      const ageSeconds = ageMilliseconds / 1000;
+      const drag = 1 - progress * 0.2;
+      const x = particle.x + particle.velocityX * ageSeconds * drag;
+      const y =
+        particle.y +
+        particle.velocityY * ageSeconds * drag +
+        particle.gravity * ageSeconds * ageSeconds / 2;
+      const previousAge = Math.max(0, ageSeconds - 0.026);
+      const previousX =
+        particle.x +
+        particle.velocityX * previousAge * drag;
+      const previousY =
+        particle.y +
+        particle.velocityY * previousAge * drag +
+        particle.gravity * previousAge * previousAge / 2;
+      const fade = Math.pow(1 - progress, 1.25);
+      const twinkle =
+        0.78 +
+        Math.sin(progress * 16 + particle.twinkleOffset) * 0.22;
+
+      ctx.globalAlpha = fade * twinkle;
+      ctx.strokeStyle = particle.color;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(1.2, particle.size * (1 - progress * 0.5));
+      ctx.beginPath();
+      ctx.moveTo(previousX, previousY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      return true;
+    }
+
+    function drawVictoryFireworks(now) {
+      const celebrationAge = now - celebrationStartedAt;
+      const canSpawnMore = celebrationAge < FIREWORK_SEQUENCE_DURATION;
+
+      if (
+        nextFireworkAt <= 0 ||
+        now - nextFireworkAt > FIREWORK_SPAWN_INTERVAL * 2
+      ) {
+        nextFireworkAt = now + FIREWORK_SPAWN_INTERVAL;
+      }
+
+      let spawnedThisFrame = 0;
+
+      while (
+        canSpawnMore &&
+        now >= nextFireworkAt &&
+        spawnedThisFrame < FIREWORK_MAX_SPAWNS_PER_FRAME
+      ) {
+        spawnVictoryFirework(nextFireworkAt);
+        nextFireworkAt += FIREWORK_SPAWN_INTERVAL;
+        spawnedThisFrame += 1;
+      }
+
+      if (canSpawnMore && now >= nextFireworkAt) {
+        nextFireworkAt = now + FIREWORK_SPAWN_INTERVAL;
+      }
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      celebrationRings = celebrationRings.filter(
+        ring => drawVictoryRing(ring, now)
+      );
+      celebrationParticles = celebrationParticles.filter(
+        particle => drawVictoryParticle(particle, now)
+      );
+      ctx.restore();
+    }
+
+    function createBlurredEndBackgroundCache() {
+      const width = 960;
+      const height = 540;
+      const cache = document.createElement('canvas');
+      cache.width = width;
+      cache.height = height;
+      const cacheContext = cache.getContext('2d', { alpha: false });
+
+      if (!cacheContext) {
+        blurredEndBackgroundCanvas = null;
+        return;
+      }
+
+      cacheContext.imageSmoothingEnabled = true;
+      cacheContext.imageSmoothingQuality = 'high';
+
+      try {
+        cacheContext.filter = 'blur(8px) brightness(0.58) saturate(0.82)';
+      } catch {
+        cacheContext.filter = 'none';
+      }
+
+      cacheContext.drawImage(
+        images.end,
+        -12,
+        -12,
+        width + 24,
+        height + 24
+      );
+      cacheContext.filter = 'none';
+      blurredEndBackgroundCanvas = cache;
+    }
+
+    function drawBlurredEndBackground() {
+      if (!blurredEndBackgroundCanvas) {
+        createBlurredEndBackgroundCache();
+      }
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      if (blurredEndBackgroundCanvas) {
+        ctx.drawImage(
+          blurredEndBackgroundCanvas,
+          0,
+          0,
+          LOGICAL_WIDTH,
+          LOGICAL_HEIGHT
+        );
+      } else {
+        ctx.drawImage(
+          images.end,
+          0,
+          0,
+          LOGICAL_WIDTH,
+          LOGICAL_HEIGHT
+        );
+        ctx.fillStyle = 'rgba(8, 3, 14, 0.44)';
+        ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+      }
+
+      ctx.restore();
+
+      ctx.save();
+      const vignette = ctx.createRadialGradient(
+        LOGICAL_WIDTH / 2,
+        LOGICAL_HEIGHT / 2,
+        120,
+        LOGICAL_WIDTH / 2,
+        LOGICAL_HEIGHT / 2,
+        920
+      );
+      vignette.addColorStop(0, 'rgba(20, 9, 26, 0.08)');
+      vignette.addColorStop(1, 'rgba(8, 3, 14, 0.66)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+      ctx.restore();
+    }
+
+    function drawVictoryMessage(now) {
+      const elapsed = Math.max(0, now - celebrationStartedAt);
+      const appearProgress = clamp(elapsed / 520, 0, 1);
+      const eased = 1 - Math.pow(1 - appearProgress, 3);
+      const panelWidth = 1120;
+      const panelHeight = 570;
+      const panelX = (LOGICAL_WIDTH - panelWidth) / 2;
+      const panelY = 250;
+      const pulse = 1 + Math.sin(elapsed / 360) * 0.008;
+
+      ctx.save();
+      ctx.translate(LOGICAL_WIDTH / 2, panelY + panelHeight / 2);
+      ctx.scale(pulse, pulse);
+      ctx.translate(-LOGICAL_WIDTH / 2, -(panelY + panelHeight / 2));
+      ctx.globalAlpha = eased;
+
+      drawRoundedRect(
+        ctx,
+        panelX,
+        panelY,
+        panelWidth,
+        panelHeight,
+        54
+      );
+      ctx.fillStyle = 'rgba(25, 13, 29, 0.68)';
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255, 225, 117, 0.82)';
+      ctx.shadowColor = 'rgba(255, 207, 72, 0.42)';
+      ctx.shadowBlur = 28;
+      ctx.stroke();
+
+      if (isNewRecord) {
+        const recordPulse = 1 + Math.sin(elapsed / 150) * 0.045;
+        const badgeWidth = 610;
+        const badgeHeight = 82;
+        const badgeX = (LOGICAL_WIDTH - badgeWidth) / 2;
+        const badgeY = panelY - 58;
+
+        ctx.save();
+        ctx.translate(LOGICAL_WIDTH / 2, badgeY + badgeHeight / 2);
+        ctx.scale(recordPulse, recordPulse);
+        ctx.translate(-LOGICAL_WIDTH / 2, -(badgeY + badgeHeight / 2));
+        drawRoundedRect(
+          ctx,
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          34
+        );
+        ctx.fillStyle = 'rgba(127, 53, 20, 0.96)';
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#ffe889';
+        ctx.stroke();
+        ctx.font = '900 42px Arial, Helvetica, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff4a8';
+        ctx.shadowColor = 'rgba(255, 214, 72, 0.75)';
+        ctx.shadowBlur = 16;
+        ctx.fillText(
+          '🎉 НОВЫЙ РЕКОРД!',
+          LOGICAL_WIDTH / 2,
+          badgeY + badgeHeight / 2 + 1
+        );
+        ctx.restore();
+      }
+
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 18;
-      ctx.strokeStyle = 'rgba(55, 30, 32, 0.96)';
-      ctx.strokeText(text, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2);
-      ctx.fillStyle = '#fff1bd';
-      ctx.fillText(text, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2);
+
+      ctx.font = '900 82px Arial, Helvetica, sans-serif';
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = 'rgba(62, 29, 44, 0.96)';
+      ctx.strokeText(
+        'УРОВЕНЬ ПРОЙДЕН!',
+        LOGICAL_WIDTH / 2,
+        panelY + 105
+      );
+      ctx.fillStyle = '#fff1a8';
+      ctx.fillText(
+        'УРОВЕНЬ ПРОЙДЕН!',
+        LOGICAL_WIDTH / 2,
+        panelY + 105
+      );
+
+      ctx.shadowBlur = 0;
+      ctx.font = '700 36px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = '#fff9df';
+      ctx.fillText(
+        'Все 10 груш найдены — вы молодец!',
+        LOGICAL_WIDTH / 2,
+        panelY + 190
+      );
+
+      if (usedHintThisRound) {
+        ctx.font = '800 40px Arial, Helvetica, sans-serif';
+        ctx.fillStyle = '#f1ff58';
+        ctx.shadowColor = 'rgba(238, 255, 92, 0.5)';
+        ctx.shadowBlur = 10;
+        ctx.fillText(
+          'Уровень пройден (с подсказкой)',
+          LOGICAL_WIDTH / 2,
+          panelY + 292
+        );
+
+        ctx.shadowBlur = 0;
+        ctx.font = '700 31px Arial, Helvetica, sans-serif';
+        ctx.fillStyle = '#fff6c9';
+        ctx.fillText(
+          'Таймер отключён — рекорд не обновлён',
+          LOGICAL_WIDTH / 2,
+          panelY + 355
+        );
+
+        if (bestTime !== null) {
+          ctx.font = '600 28px Arial, Helvetica, sans-serif';
+          ctx.fillStyle = 'rgba(255, 249, 223, 0.82)';
+          ctx.fillText(
+            `Сохранённый рекорд: ${formatTime(bestTime)}`,
+            LOGICAL_WIDTH / 2,
+            panelY + 407
+          );
+        }
+      } else {
+        ctx.font = '800 40px Arial, Helvetica, sans-serif';
+        ctx.fillStyle = '#f1ff58';
+        ctx.shadowColor = 'rgba(238, 255, 92, 0.55)';
+        ctx.shadowBlur = 12;
+        ctx.fillText(
+          `Время раунда: ${formatTime(finalElapsed)}`,
+          LOGICAL_WIDTH / 2,
+          panelY + 292
+        );
+
+        ctx.shadowBlur = 0;
+        ctx.font = '700 35px Arial, Helvetica, sans-serif';
+        ctx.fillStyle = '#fff6c9';
+        ctx.fillText(
+          `Лучшее время: ${formatTime(bestTime ?? finalElapsed)}`,
+          LOGICAL_WIDTH / 2,
+          panelY + 365
+        );
+      }
+
+      ctx.font = '600 29px Arial, Helvetica, sans-serif';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.84)';
+      ctx.fillText(
+        'Нажмите на экран, чтобы вернуться на старт',
+        LOGICAL_WIDTH / 2,
+        panelY + 478
+      );
+
       ctx.restore();
+    }
+
+    function drawVictoryScreen(now) {
+      drawBlurredEndBackground();
+      drawVictoryFireworks(now);
+      drawVictoryMessage(now);
     }
 
     function showVolumeHud() {
@@ -2022,6 +2926,190 @@
       hudCtx.restore();
     }
 
+    function drawStartBestTime() {
+      if (state !== STATE_START || bestTime === null || !assetsReady) {
+        return;
+      }
+
+      const width = 470;
+      const height = 72;
+      const x = LOGICAL_WIDTH - width - 30;
+      const y = 28;
+
+      hudCtx.save();
+      drawRoundedRect(hudCtx, x, y, width, height, 26);
+      hudCtx.fillStyle = 'rgba(16, 22, 19, 0.76)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = 'rgba(255, 235, 112, 0.76)';
+      hudCtx.stroke();
+      hudCtx.font = '800 34px Arial, Helvetica, sans-serif';
+      hudCtx.textAlign = 'center';
+      hudCtx.textBaseline = 'middle';
+      hudCtx.fillStyle = '#fff4a8';
+      hudCtx.shadowColor = 'rgba(255, 214, 72, 0.55)';
+      hudCtx.shadowBlur = 9;
+      hudCtx.fillText(
+        `Рекорд: ${formatTime(bestTime)}`,
+        x + width / 2,
+        y + height / 2 + 1
+      );
+      hudCtx.restore();
+    }
+
+    function drawBulbIcon(context, centerX, centerY, size, disabled) {
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = disabled ? '#9d9d86' : '#fff36c';
+      context.fillStyle = disabled ? '#777768' : '#fff36c';
+      context.lineWidth = Math.max(4, size * 0.08);
+      context.shadowColor = disabled ? 'transparent' : '#fff36c';
+      context.shadowBlur = disabled ? 0 : 14;
+      context.beginPath();
+      context.arc(centerX, centerY - size * 0.1, size * 0.27, Math.PI * 0.15, Math.PI * 0.85, true);
+      context.quadraticCurveTo(
+        centerX - size * 0.23,
+        centerY + size * 0.16,
+        centerX - size * 0.12,
+        centerY + size * 0.27
+      );
+      context.lineTo(centerX + size * 0.12, centerY + size * 0.27);
+      context.quadraticCurveTo(
+        centerX + size * 0.23,
+        centerY + size * 0.16,
+        centerX + size * 0.27,
+        centerY - size * 0.1
+      );
+      context.fill();
+      context.beginPath();
+      context.moveTo(centerX - size * 0.13, centerY + size * 0.36);
+      context.lineTo(centerX + size * 0.13, centerY + size * 0.36);
+      context.moveTo(centerX - size * 0.09, centerY + size * 0.46);
+      context.lineTo(centerX + size * 0.09, centerY + size * 0.46);
+      context.stroke();
+      context.restore();
+    }
+
+    function drawRestartIcon(context, centerX, centerY, size, disabled) {
+      const color = disabled ? '#99998d' : '#fff6b3';
+
+      context.save();
+      context.strokeStyle = color;
+      context.fillStyle = color;
+      context.lineWidth = Math.max(5, size * 0.09);
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.shadowColor = disabled ? 'transparent' : 'rgba(255, 214, 72, 0.65)';
+      context.shadowBlur = disabled ? 0 : 10;
+      context.beginPath();
+      context.arc(
+        centerX,
+        centerY,
+        size * 0.31,
+        -Math.PI * 0.85,
+        Math.PI * 0.72
+      );
+      context.stroke();
+      context.beginPath();
+      context.moveTo(centerX - size * 0.38, centerY - size * 0.21);
+      context.lineTo(centerX - size * 0.13, centerY - size * 0.25);
+      context.lineTo(centerX - size * 0.24, centerY - size * 0.02);
+      context.closePath();
+      context.fill();
+      context.restore();
+    }
+
+    function drawGameControlButtons(now) {
+      if (state !== STATE_GAME) {
+        return;
+      }
+
+      const hintDisabled = victoryPending || now < hintCooldownUntil;
+      const controls = [
+        { rect: HINT_BUTTON_RECT, kind: 'hint', disabled: hintDisabled },
+        { rect: RESTART_BUTTON_RECT, kind: 'restart', disabled: victoryPending }
+      ];
+
+      for (const control of controls) {
+        const rect = control.rect;
+        hudCtx.save();
+        drawRoundedRect(
+          hudCtx,
+          rect.x,
+          rect.y,
+          rect.width,
+          rect.height,
+          26
+        );
+        hudCtx.fillStyle = control.disabled
+          ? 'rgba(18, 23, 21, 0.52)'
+          : 'rgba(18, 23, 21, 0.68)';
+        hudCtx.fill();
+        hudCtx.lineWidth = 3;
+        hudCtx.strokeStyle = control.disabled
+          ? 'rgba(190, 190, 175, 0.4)'
+          : 'rgba(255, 245, 166, 0.72)';
+        hudCtx.stroke();
+        hudCtx.restore();
+
+        if (control.kind === 'hint') {
+          drawBulbIcon(
+            hudCtx,
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2 - 2,
+            72,
+            control.disabled
+          );
+        } else {
+          drawRestartIcon(
+            hudCtx,
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+            74,
+            control.disabled
+          );
+        }
+      }
+
+      if (now < hintCooldownUntil) {
+        const rect = HINT_BUTTON_RECT;
+        const remaining = hintCooldownUntil - now;
+        const ratio = clamp(remaining / HINT_COOLDOWN_MS, 0, 1);
+        const overlayHeight = rect.height * ratio;
+
+        hudCtx.save();
+        drawRoundedRect(
+          hudCtx,
+          rect.x,
+          rect.y + rect.height - overlayHeight,
+          rect.width,
+          overlayHeight,
+          Math.min(26, overlayHeight / 2)
+        );
+        hudCtx.fillStyle = 'rgba(5, 8, 8, 0.58)';
+        hudCtx.fill();
+        hudCtx.font = '900 27px Arial, Helvetica, sans-serif';
+        hudCtx.textAlign = 'center';
+        hudCtx.textBaseline = 'middle';
+        hudCtx.fillStyle = '#ffffff';
+        hudCtx.lineWidth = 5;
+        hudCtx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+        const seconds = Math.ceil(remaining / 1000);
+        hudCtx.strokeText(
+          String(seconds),
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2
+        );
+        hudCtx.fillText(
+          String(seconds),
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2
+        );
+        hudCtx.restore();
+      }
+    }
+
     function drawAudioHud(now) {
       hudCtx.save();
       hudCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2029,6 +3117,8 @@
       hudCtx.restore();
 
       drawMuteButton();
+      drawGameControlButtons(now);
+      drawStartBestTime();
       drawVolumePopup(now);
     }
 
@@ -2039,6 +3129,154 @@
         point.y >= MUTE_BUTTON_HIT_RECT.y &&
         point.y <= MUTE_BUTTON_HIT_RECT.y + MUTE_BUTTON_HIT_RECT.height
       );
+    }
+
+    function pointIsInsideRect(point, rect) {
+      return (
+        point.x >= rect.x &&
+        point.x <= rect.x + rect.width &&
+        point.y >= rect.y &&
+        point.y <= rect.y + rect.height
+      );
+    }
+
+    function useHint(now) {
+      if (
+        state !== STATE_GAME ||
+        victoryPending ||
+        now < hintCooldownUntil
+      ) {
+        return;
+      }
+
+      const available = pears.filter(pear => !pear.isFound);
+
+      if (available.length === 0) {
+        return;
+      }
+
+      const selected = available[
+        Math.floor(Math.random() * available.length)
+      ];
+      hintedPearId = selected.id;
+      hintEffectUntil = now + HINT_EFFECT_DURATION;
+      hintCooldownUntil = now + HINT_COOLDOWN_MS;
+      usedHintThisRound = true;
+      penaltyMilliseconds = 0;
+      penaltyTexts = [];
+      audioController.playSfx('button');
+    }
+
+    function drawRestartSpinner(now, alpha) {
+      const centerX = LOGICAL_WIDTH / 2;
+      const centerY = LOGICAL_HEIGHT / 2 - 26;
+      const radius = 54;
+      const rotation = (now / 620) * Math.PI * 2;
+
+      ctx.save();
+      ctx.globalAlpha = clamp(alpha, 0, 1);
+      ctx.translate(centerX, centerY);
+      ctx.rotate(rotation);
+      ctx.lineWidth = 12;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#fff1a1';
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, -Math.PI * 0.15, Math.PI * 1.42);
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff1a1';
+      ctx.beginPath();
+      ctx.moveTo(-radius - 2, -18);
+      ctx.lineTo(-radius + 25, -11);
+      ctx.lineTo(-radius + 9, 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawRestartCover(now) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#242016';
+      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+
+      const failed = Boolean(restartFailureMessage);
+
+      if (!failed) {
+        drawRestartSpinner(now, 1);
+      }
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '800 42px Arial, Helvetica, sans-serif';
+      ctx.lineWidth = 7;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.fillStyle = failed ? '#ffcfb0' : '#fff3b2';
+
+      const message = failed
+        ? restartFailureMessage
+        : 'Перемешиваем груши…';
+
+      ctx.strokeText(
+        message,
+        LOGICAL_WIDTH / 2,
+        LOGICAL_HEIGHT / 2 + 70
+      );
+      ctx.fillText(
+        message,
+        LOGICAL_WIDTH / 2,
+        LOGICAL_HEIGHT / 2 + 70
+      );
+
+      if (failed) {
+        ctx.font = '600 28px Arial, Helvetica, sans-serif';
+        ctx.lineWidth = 5;
+        ctx.fillStyle = '#fff3dc';
+        ctx.strokeText(
+          'Возвращаем прежний раунд',
+          LOGICAL_WIDTH / 2,
+          LOGICAL_HEIGHT / 2 + 126
+        );
+        ctx.fillText(
+          'Возвращаем прежний раунд',
+          LOGICAL_WIDTH / 2,
+          LOGICAL_HEIGHT / 2 + 126
+        );
+      }
+
+      ctx.restore();
+    }
+
+    function drawRestartTransition(now) {
+      // В каждом кадре перезапуска сначала рисуется полностью непрозрачный
+      // экран. Никакой старой или новой раскладки под полупрозрачным слоем нет.
+      drawRestartCover(now);
+
+      if (!restartCoverPresented) {
+        // Генерация начнётся лишь в следующем RAF. К этому моменту браузер уже
+        // успеет физически показать пользователю текущий непрозрачный кадр.
+        restartCoverPresented = true;
+        return;
+      }
+
+      if (restartFailureMessage) {
+        if (now >= restartFailureReturnAt) {
+          abortRestartTransition(now);
+        }
+        return;
+      }
+
+      if (!restartLayoutPrepared) {
+        prepareRestartLayout(now);
+        return;
+      }
+
+      if (now >= restartRevealAt) {
+        // Открываем новую сцену мгновенным срезом на следующем кадре. Fade-in
+        // намеренно отсутствует: он сам подсвечивал бы момент появления груш.
+        finishRestartTransition(now);
+      }
     }
 
     function drawLoadingScreen() {
@@ -2130,16 +3368,24 @@
           }
 
           drawEffects(now);
-          drawGameTimer(now);
+          drawPenaltyTexts(now);
+          drawGameHud(now);
+
+          if (hintedPearId !== null && now >= hintEffectUntil) {
+            hintedPearId = null;
+          }
 
           if (victoryPending && now >= victoryTransitionAt) {
             completeVictoryTransition();
           }
           break;
 
+        case STATE_RESTARTING:
+          drawRestartTransition(now);
+          break;
+
         case STATE_END:
-          drawBackground(images.end);
-          drawFinalTime();
+          drawVictoryScreen(now);
           break;
 
         default:
@@ -2151,15 +3397,20 @@
       requestAnimationFrame(render);
     }
 
-    function pointHitsPearPixelPerfect(point, pear) {
+    function pointHitsPear(point, pear, visualScale = 1) {
+      const safeScale = Math.max(0.001, visualScale);
       const dx = point.x - pear.x;
       const dy = point.y - pear.y;
       const cosine = Math.cos(pear.angle);
       const sine = Math.sin(pear.angle);
 
-      let localX = dx * cosine + dy * sine;
-      let localY = -dx * sine + dy * cosine;
+      // Переводим клик в локальные координаты повёрнутого спрайта.
+      // Масштаб учитывает Pop-анимацию найденной груши и подсветку подсказки.
+      let localX = (dx * cosine + dy * sine) / safeScale;
+      let localY = (-dx * sine + dy * cosine) / safeScale;
 
+      // Вертикальное смещение эллипса повторяет форму груши, поэтому отражения
+      // должны применяться так же, как при отрисовке самого спрайта.
       if (pear.flipX) {
         localX *= -1;
       }
@@ -2170,46 +3421,25 @@
 
       const normalizedX = (localX + pear.width / 2) / pear.width;
       const normalizedY = (localY + pear.height / 2) / pear.height;
+      const ellipseX = (normalizedX - 0.5) / 0.58;
+      const ellipseY = (normalizedY - 0.52) / 0.60;
 
-      if (
-        normalizedX < 0 ||
-        normalizedX >= 1 ||
-        normalizedY < 0 ||
-        normalizedY >= 1
-      ) {
-        return false;
-      }
-
-      if (!pearAlphaMask) {
-        const ellipseX = (normalizedX - 0.5) / 0.46;
-        const ellipseY = (normalizedY - 0.54) / 0.48;
-        return ellipseX * ellipseX + ellipseY * ellipseY <= 1;
-      }
-
-      const pixelX = Math.min(
-        pearAlphaMask.width - 1,
-        Math.floor(normalizedX * pearAlphaMask.width)
-      );
-      const pixelY = Math.min(
-        pearAlphaMask.height - 1,
-        Math.floor(normalizedY * pearAlphaMask.height)
-      );
-      const alpha = pearAlphaMask.alpha[
-        pixelY * pearAlphaMask.width + pixelX
-      ];
-
-      return alpha >= ALPHA_THRESHOLD;
+      return ellipseX * ellipseX + ellipseY * ellipseY <= 1;
     }
 
-    function findHitPear(point) {
+    function findHitPear(point, now, foundState) {
       for (let index = pears.length - 1; index >= 0; index -= 1) {
         const pear = pears[index];
 
-        if (pear.isFound) {
+        if (pear.isFound !== foundState) {
           continue;
         }
 
-        if (pointHitsPearPixelPerfect(point, pear)) {
+        const visualScale = pear.isFound
+          ? getPopScale(pear, now)
+          : getHintScale(pear, now);
+
+        if (pointHitsPear(point, pear, visualScale)) {
           return pear;
         }
       }
@@ -2268,15 +3498,32 @@
         return;
       }
 
-      const pear = findHitPear(point);
+      const now = performance.now();
+      const pear = findHitPear(point, now, false);
 
       if (!pear) {
+        const foundPear = findHitPear(point, now, true);
+
+        if (foundPear) {
+          return;
+        }
+
+        if (!usedHintThisRound) {
+          penaltyMilliseconds += MISS_PENALTY_MS;
+          addPenaltyText(point, now);
+        }
+        audioController.playSfx('miss');
         return;
       }
 
-      const now = performance.now();
       pear.isFound = true;
       pear.foundAt = now;
+
+      if (pear.id === hintedPearId) {
+        hintedPearId = null;
+        hintEffectUntil = 0;
+      }
+
       spawnFindEffects(pear, now);
       vibrateOnSuccess();
       const roundComplete = pears.every(item => item.isFound);
@@ -2307,6 +3554,22 @@
       if (point && pointIsInsideMuteButton(point)) {
         audioController.toggleMute();
         return;
+      }
+
+      if (state === STATE_GAME && point) {
+        const now = performance.now();
+
+        if (pointIsInsideRect(point, HINT_BUTTON_HIT_RECT)) {
+          useHint(now);
+          return;
+        }
+
+        if (pointIsInsideRect(point, RESTART_BUTTON_HIT_RECT)) {
+          if (!victoryPending) {
+            beginRestartRound();
+          }
+          return;
+        }
       }
 
       const isTouchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
@@ -2345,12 +3608,16 @@
       volumeGesture.latestClientX = event.clientX;
       volumeGesture.latestClientY = event.clientY;
 
-      const distance = Math.hypot(
-        event.clientX - volumeGesture.startClientX,
-        event.clientY - volumeGesture.startClientY
-      );
+      const deltaX = event.clientX - volumeGesture.startClientX;
+      const deltaY = event.clientY - volumeGesture.startClientY;
+      const absoluteX = Math.abs(deltaX);
+      const absoluteY = Math.abs(deltaY);
 
-      if (distance >= VOLUME_SWIPE_THRESHOLD) {
+      if (
+        !volumeGesture.moved &&
+        absoluteY >= VOLUME_SWIPE_THRESHOLD &&
+        absoluteY >= absoluteX * VOLUME_SWIPE_AXIS_RATIO
+      ) {
         volumeGesture.moved = true;
       }
 
@@ -2389,7 +3656,10 @@
       }
 
       if (!cancelled && !gesture.moved) {
-        activateCurrentState(event.clientX, event.clientY);
+        activateCurrentState(
+          gesture.startClientX,
+          gesture.startClientY
+        );
       }
     }
 
@@ -2435,11 +3705,56 @@
     }
 
     function handleVisibilityChange() {
+      const now = performance.now();
+
       if (document.hidden) {
+        if (pageHiddenAt <= 0) {
+          pageHiddenAt = now;
+        }
+
         audioController.suspendForPageHide();
-      } else {
-        audioController.resumeAfterPageShow();
+        return;
       }
+
+      if (pageHiddenAt > 0) {
+        const hiddenAt = pageHiddenAt;
+        const pauseDuration = Math.max(0, now - hiddenAt);
+        pageHiddenAt = 0;
+
+        if (state === STATE_RESTARTING && pauseDuration > 0) {
+          if (restartTransitionStartedAt > 0) {
+            restartTransitionStartedAt += pauseDuration;
+          }
+
+          if (restartPausedRoundAt > 0) {
+            restartPausedRoundAt += pauseDuration;
+          }
+
+          if (restartRevealAt > hiddenAt) {
+            restartRevealAt += pauseDuration;
+          }
+
+          if (restartFailureReturnAt > hiddenAt) {
+            restartFailureReturnAt += pauseDuration;
+          }
+        } else if (state === STATE_GAME && pauseDuration > 0) {
+          shiftActiveRoundTimestamps(hiddenAt, pauseDuration);
+        } else if (state === STATE_END && pauseDuration > 0) {
+          celebrationStartedAt += pauseDuration;
+
+          for (const ring of celebrationRings) {
+            ring.createdAt += pauseDuration;
+          }
+
+          for (const particle of celebrationParticles) {
+            particle.createdAt += pauseDuration;
+          }
+
+          nextFireworkAt = now + FIREWORK_RESUME_DELAY;
+        }
+      }
+
+      audioController.resumeAfterPageShow();
     }
 
     function preventDefault(event) {
