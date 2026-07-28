@@ -1,0 +1,2494 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  >
+  <meta name="theme-color" content="#000000">
+  <title>Поиск предметов</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      overscroll-behavior: none;
+    }
+
+    canvas {
+      position: fixed;
+      z-index: 1;
+      display: block;
+      margin: 0;
+      padding: 0;
+      background: #000;
+      touch-action: none;
+      cursor: pointer;
+      outline: none;
+    }
+
+    #startScreen {
+      position: fixed;
+      z-index: 2;
+      display: none;
+      margin: 0;
+      padding: 0;
+      object-fit: fill;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+      image-rendering: auto;
+    }
+
+    #audioHudCanvas {
+      z-index: 3;
+      background: transparent;
+      pointer-events: none;
+      cursor: default;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas
+    id="gameCanvas"
+    width="1920"
+    height="1080"
+    role="application"
+    aria-label="Игра Поиск предметов"
+    tabindex="0"
+  ></canvas>
+
+  <img
+    id="startScreen"
+    alt=""
+    aria-hidden="true"
+    draggable="false"
+  >
+
+  <canvas
+    id="audioHudCanvas"
+    width="1920"
+    height="1080"
+    aria-hidden="true"
+  ></canvas>
+
+  <script>
+    'use strict';
+
+    const LOGICAL_WIDTH = 1920;
+    const LOGICAL_HEIGHT = 1080;
+    const MAX_BACKING_SCALE = 2;
+
+    const PEAR_COUNT = 10;
+    const PEAR_MAX_SIDE = 98;
+    const EDGE_MARGIN = 100;
+    const MIN_CENTER_DISTANCE = 200;
+    const POSITION_ATTEMPTS = 1000;
+    const LAYOUT_ATTEMPTS = 25;
+    const ALPHA_THRESHOLD = 24;
+    const ALPHA_MASK_MAX_SIDE = 512;
+
+    const EFFECT_DURATION = 500;
+    const POP_DURATION = 320;
+    const VICTORY_DELAY = 580;
+    const IMAGE_LOAD_TIMEOUT = 15000;
+
+    const DEFAULT_GLOBAL_VOLUME = 0.7;
+    const VOLUME_STEP = 0.05;
+    const VOLUME_HUD_DURATION = 1500;
+    const VOLUME_HUD_FADE_DURATION = 450;
+    const VOLUME_SWIPE_ZONE_RATIO = 0.15;
+    const VOLUME_SWIPE_TRAVEL_RATIO = 0.6;
+    const VOLUME_SWIPE_THRESHOLD = 12;
+    const MUSIC_FADE_OUT_DURATION = 800;
+    const AUDIO_LOAD_TIMEOUT = 12000;
+
+    const MUTE_BUTTON_RECT = Object.freeze({
+      x: 24,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const MUTE_BUTTON_HIT_RECT = Object.freeze({
+      x: 0,
+      y: 0,
+      width: 220,
+      height: 180
+    });
+
+    const MUTE_BUTTON_SPAWN_BLOCK_RECT = Object.freeze({
+      x: 0,
+      y: 0,
+      width: 250,
+      height: 205
+    });
+
+    const STATE_START = 'STATE_START';
+    const STATE_GAME = 'STATE_GAME';
+    const STATE_END = 'STATE_END';
+
+    const HUD_RECT = Object.freeze({
+      x: LOGICAL_WIDTH - 360,
+      y: 18,
+      width: 326,
+      height: 74
+    });
+
+    const canvas = document.getElementById('gameCanvas');
+    const startScreen = document.getElementById('startScreen');
+    const audioHudCanvas = document.getElementById('audioHudCanvas');
+
+    const ctx = canvas.getContext('2d', {
+      alpha: false,
+      desynchronized: true
+    });
+
+    const hudCtx = audioHudCanvas.getContext('2d', {
+      alpha: true,
+      desynchronized: true
+    });
+
+    if (!ctx || !hudCtx) {
+      throw new Error('Canvas 2D не поддерживается этим браузером.');
+    }
+
+    if (!(startScreen instanceof HTMLImageElement)) {
+      throw new Error('Не найден HTML-элемент стартового экрана.');
+    }
+
+    const START_GIF_PATH = encodeURI('СТАРТ.gif');
+    const START_PNG_PATH = encodeURI('СТАРТ.png');
+
+    const assetFiles = Object.freeze({
+      level: encodeURI('игровой-уровень.png'),
+      end: encodeURI('конец-игры.png'),
+      pear: encodeURI('груша.png'),
+      pearColor: encodeURI('груша-цвет.png')
+    });
+
+    const audioFiles = Object.freeze({
+      introMusic: encodeURI('intromusic.mp3'),
+      levelMusic: encodeURI('levelmusic.mp3'),
+      soundButton: encodeURI('soundButton.mp3'),
+      soundPearClick: encodeURI('soundPearClick.mp3'),
+      soundLevelComplete: encodeURI('soundLevelComplete.mp3')
+    });
+
+    const LOGICAL_ASSET_COUNT = 1 + Object.keys(assetFiles).length;
+    const images = Object.create(null);
+
+    let state = STATE_START;
+    let pears = [];
+    let particles = [];
+    let bursts = [];
+    let pearAlphaMask = null;
+
+    let assetsReady = false;
+    let isPreloading = false;
+    let loadedAssets = 0;
+    let loadErrors = [];
+    let startAssetSource = '';
+    let startAssetIsGif = false;
+    let startScreenVisible = false;
+
+    let timerStartedAt = 0;
+    let finalElapsed = 0;
+    let victoryPending = false;
+    let victoryTransitionAt = 0;
+
+    let volumeHudVisibleUntil = 0;
+    let volumeGesture = null;
+
+    function clamp(value, minimum, maximum) {
+      return Math.min(maximum, Math.max(minimum, value));
+    }
+
+    class AudioController {
+      constructor(files) {
+        this.files = files;
+        this.music = {
+          intro: null,
+          level: null
+        };
+        this.sfx = {
+          button: null,
+          pear: null,
+          complete: null
+        };
+        this.musicFadeFactors = {
+          intro: 1,
+          level: 1
+        };
+        this.activeSfx = new Set();
+        this.audioContext = null;
+        this.unlocked = false;
+        this.pageSuspended = false;
+        this.desiredMusic = 'intro';
+        this.transitionToken = 0;
+        this.musicTransitionInProgress = false;
+        this.globalVolume = this.loadStoredVolume();
+        this.lastAudibleVolume = this.globalVolume > 0
+          ? this.globalVolume
+          : DEFAULT_GLOBAL_VOLUME;
+        this.muted = this.loadStoredMute();
+      }
+
+      loadStoredVolume() {
+        try {
+          const stored = Number.parseFloat(
+            window.localStorage.getItem('pearGameGlobalVolume')
+          );
+
+          if (Number.isFinite(stored)) {
+            return clamp(stored, 0, 1);
+          }
+        } catch {
+          // localStorage может быть отключён в приватном режиме.
+        }
+
+        return DEFAULT_GLOBAL_VOLUME;
+      }
+
+      loadStoredMute() {
+        try {
+          return window.localStorage.getItem('pearGameMuted') === '1';
+        } catch {
+          return false;
+        }
+      }
+
+      saveSettings() {
+        try {
+          window.localStorage.setItem(
+            'pearGameGlobalVolume',
+            String(this.globalVolume)
+          );
+          window.localStorage.setItem(
+            'pearGameMuted',
+            this.muted ? '1' : '0'
+          );
+        } catch {
+          // Игра продолжает работать без сохранения настроек.
+        }
+      }
+
+      get effectiveVolume() {
+        return this.muted ? 0 : this.globalVolume;
+      }
+
+      get isEffectivelyMuted() {
+        return this.muted || this.globalVolume <= 0;
+      }
+
+      initialize() {
+        const tasks = [
+          this.loadOptionalAudio(this.files.introMusic, true)
+            .then(audio => this.registerMusicTrack('intro', audio))
+            .catch(() => null),
+
+          this.loadOptionalAudio(this.files.levelMusic, true)
+            .then(audio => this.registerMusicTrack('level', audio))
+            .catch(() => null),
+
+          this.loadOptionalAudio(this.files.soundButton, false)
+            .then(audio => {
+              this.sfx.button = audio;
+            })
+            .catch(() => null),
+
+          this.loadOptionalAudio(this.files.soundPearClick, false)
+            .then(audio => {
+              this.sfx.pear = audio;
+            })
+            .catch(() => null),
+
+          this.loadOptionalAudio(this.files.soundLevelComplete, false)
+            .then(audio => {
+              this.sfx.complete = audio;
+            })
+            .catch(() => null)
+        ];
+
+        Promise.allSettled(tasks).catch(() => {
+          // Ошибки аудио никогда не блокируют игру.
+        });
+      }
+
+      registerMusicTrack(name, audio) {
+        this.music[name] = audio;
+        this.applyMusicVolume(name);
+
+        if (
+          this.unlocked &&
+          !this.pageSuspended &&
+          !this.musicTransitionInProgress &&
+          this.desiredMusic === name
+        ) {
+          this.playTrack(name);
+        }
+
+        return audio;
+      }
+
+      loadOptionalAudio(path, loop) {
+        try {
+          return new Promise((resolve, reject) => {
+            const audio = new Audio();
+            let settled = false;
+
+            const finish = (handler, value) => {
+              if (settled) {
+                return;
+              }
+
+              settled = true;
+              window.clearTimeout(timeoutId);
+              audio.removeEventListener('canplay', onReady);
+              audio.removeEventListener('loadeddata', onReady);
+              audio.removeEventListener('error', onError);
+              handler(value);
+            };
+
+            const onReady = () => finish(resolve, audio);
+            const onError = () => finish(
+              reject,
+              new Error(`Не удалось загрузить аудио «${decodeURI(path)}».`)
+            );
+
+            const timeoutId = window.setTimeout(() => {
+              finish(
+                reject,
+                new Error(`Истекло время загрузки аудио «${decodeURI(path)}».`)
+              );
+            }, AUDIO_LOAD_TIMEOUT);
+
+            audio.preload = 'auto';
+            audio.loop = loop;
+            audio.playsInline = true;
+            audio.addEventListener('canplay', onReady, { once: true });
+            audio.addEventListener('loadeddata', onReady, { once: true });
+            audio.addEventListener('error', onError, { once: true });
+            audio.src = path;
+            audio.load();
+          });
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+
+      getAudioContext() {
+        if (this.audioContext) {
+          return this.audioContext;
+        }
+
+        const AudioContextClass =
+          window.AudioContext || window.webkitAudioContext;
+
+        if (!AudioContextClass) {
+          return null;
+        }
+
+        try {
+          this.audioContext = new AudioContextClass();
+        } catch {
+          this.audioContext = null;
+        }
+
+        return this.audioContext;
+      }
+
+      resumeAudioContext() {
+        const audioContext = this.getAudioContext();
+
+        if (!audioContext || audioContext.state !== 'suspended') {
+          return;
+        }
+
+        audioContext.resume().catch(() => {
+          // Синтезированный fallback останется беззвучным.
+        });
+      }
+
+      unlock() {
+        const isFirstUnlock = !this.unlocked;
+        this.unlocked = true;
+        this.resumeAudioContext();
+
+        if (this.pageSuspended) {
+          return;
+        }
+
+        if (isFirstUnlock) {
+          this.syncDesiredMusic();
+          return;
+        }
+
+        if (!this.musicTransitionInProgress && this.desiredMusic) {
+          const desiredTrack = this.music[this.desiredMusic];
+
+          if (desiredTrack && desiredTrack.paused) {
+            this.playTrack(this.desiredMusic);
+          }
+        }
+      }
+
+      setGlobalVolume(value, showHud = true) {
+        const wasEffectivelyMuted = this.isEffectivelyMuted;
+        const nextVolume = Math.round(clamp(value, 0, 1) * 100) / 100;
+
+        if (nextVolume > 0) {
+          this.lastAudibleVolume = nextVolume;
+        }
+
+        if (Math.abs(nextVolume - this.globalVolume) < 0.001) {
+          if (showHud) {
+            showVolumeHud();
+          }
+          return;
+        }
+
+        this.globalVolume = nextVolume;
+        this.applyAllVolumes();
+        this.saveSettings();
+
+        if (
+          wasEffectivelyMuted &&
+          !this.isEffectivelyMuted &&
+          !this.pageSuspended
+        ) {
+          this.resumeAudioContext();
+          this.syncDesiredMusic();
+        }
+
+        if (showHud) {
+          showVolumeHud();
+        }
+      }
+
+      changeVolume(delta) {
+        this.setGlobalVolume(this.globalVolume + delta, true);
+      }
+
+      toggleMute() {
+        if (this.muted) {
+          this.muted = false;
+
+          if (this.globalVolume <= 0) {
+            this.globalVolume = clamp(
+              this.lastAudibleVolume || DEFAULT_GLOBAL_VOLUME,
+              VOLUME_STEP,
+              1
+            );
+          }
+        } else if (this.globalVolume <= 0) {
+          this.globalVolume = clamp(
+            this.lastAudibleVolume || DEFAULT_GLOBAL_VOLUME,
+            VOLUME_STEP,
+            1
+          );
+          this.muted = false;
+        } else {
+          this.muted = true;
+        }
+
+        this.applyAllVolumes();
+        this.saveSettings();
+        showVolumeHud();
+
+        if (!this.muted && !this.pageSuspended) {
+          this.resumeAudioContext();
+          this.syncDesiredMusic();
+        }
+      }
+
+      applyAllVolumes() {
+        this.applyMusicVolume('intro');
+        this.applyMusicVolume('level');
+
+        for (const instance of this.activeSfx) {
+          instance.volume = clamp(this.effectiveVolume * 0.85, 0, 1);
+        }
+      }
+
+      applyMusicVolume(name) {
+        const audio = this.music[name];
+
+        if (!audio) {
+          return;
+        }
+
+        const fadeFactor = this.musicFadeFactors[name] ?? 1;
+        audio.volume = clamp(
+          this.effectiveVolume * 0.65 * fadeFactor,
+          0,
+          1
+        );
+      }
+
+      pauseTrack(name) {
+        const audio = this.music[name];
+
+        if (!audio) {
+          return;
+        }
+
+        try {
+          audio.pause();
+        } catch {
+          // Невозможность приостановки аудио не влияет на игру.
+        }
+      }
+
+      stopTrack(name) {
+        const audio = this.music[name];
+
+        if (!audio) {
+          this.musicFadeFactors[name] = 1;
+          return;
+        }
+
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {
+          // Невозможность остановки аудио не влияет на игру.
+        }
+
+        this.musicFadeFactors[name] = 1;
+        this.applyMusicVolume(name);
+      }
+
+      playTrack(name) {
+        const audio = this.music[name];
+
+        if (
+          !audio ||
+          !this.unlocked ||
+          this.pageSuspended ||
+          this.isEffectivelyMuted
+        ) {
+          return;
+        }
+
+        this.musicFadeFactors[name] = 1;
+        this.applyMusicVolume(name);
+
+        try {
+          const playPromise = audio.play();
+
+          if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+              // Autoplay может быть заблокирован до пользовательского жеста.
+            });
+          }
+        } catch {
+          // Музыка опциональна: игра продолжает работать без неё.
+        }
+      }
+
+      syncDesiredMusic() {
+        if (!this.unlocked || this.pageSuspended) {
+          return;
+        }
+
+        if (this.musicTransitionInProgress) {
+          return;
+        }
+
+        if (this.desiredMusic === 'intro') {
+          this.stopTrack('level');
+          this.playTrack('intro');
+        } else if (this.desiredMusic === 'level') {
+          this.stopTrack('intro');
+          this.playTrack('level');
+        } else {
+          this.stopTrack('intro');
+          this.stopTrack('level');
+        }
+      }
+
+      enterStart() {
+        this.transitionToken += 1;
+        this.musicTransitionInProgress = false;
+        this.desiredMusic = 'intro';
+        this.stopTrack('level');
+        this.playTrack('intro');
+      }
+
+      transitionToGame() {
+        const token = ++this.transitionToken;
+        this.desiredMusic = 'level';
+        this.musicTransitionInProgress = true;
+        this.stopTrack('level');
+
+        const intro = this.music.intro;
+
+        if (
+          !this.unlocked ||
+          this.pageSuspended ||
+          !intro ||
+          intro.paused
+        ) {
+          this.stopTrack('intro');
+          this.musicTransitionInProgress = false;
+          this.playTrack('level');
+          return;
+        }
+
+        this.fadeOutTrack('intro', MUSIC_FADE_OUT_DURATION, token)
+          .then(completed => {
+            if (
+              completed &&
+              token === this.transitionToken &&
+              this.desiredMusic === 'level'
+            ) {
+              this.musicTransitionInProgress = false;
+              this.playTrack('level');
+            }
+          })
+          .catch(() => {
+            if (
+              token === this.transitionToken &&
+              this.desiredMusic === 'level'
+            ) {
+              this.stopTrack('intro');
+              this.musicTransitionInProgress = false;
+              this.playTrack('level');
+            }
+          });
+      }
+
+      fadeOutTrack(name, durationMilliseconds, token) {
+        return new Promise(resolve => {
+          const audio = this.music[name];
+
+          if (!audio || audio.paused || durationMilliseconds <= 0) {
+            this.stopTrack(name);
+            resolve(true);
+            return;
+          }
+
+          const startedAt = performance.now();
+
+          const step = now => {
+            if (token !== this.transitionToken) {
+              resolve(false);
+              return;
+            }
+
+            const progress = clamp(
+              (now - startedAt) / durationMilliseconds,
+              0,
+              1
+            );
+
+            this.musicFadeFactors[name] = 1 - progress;
+            this.applyMusicVolume(name);
+
+            if (progress >= 1) {
+              this.stopTrack(name);
+              resolve(true);
+              return;
+            }
+
+            requestAnimationFrame(step);
+          };
+
+          requestAnimationFrame(step);
+        });
+      }
+
+      enterEnd(playCompletionSound = true) {
+        this.transitionToken += 1;
+        this.musicTransitionInProgress = false;
+        this.desiredMusic = null;
+        this.stopTrack('intro');
+        this.stopTrack('level');
+
+        if (playCompletionSound) {
+          this.playSfx('complete');
+        }
+      }
+
+      suspendForPageHide() {
+        if (this.pageSuspended) {
+          return;
+        }
+
+        this.pageSuspended = true;
+        this.transitionToken += 1;
+        this.musicTransitionInProgress = false;
+        this.pauseTrack('intro');
+        this.pauseTrack('level');
+
+        for (const instance of this.activeSfx) {
+          try {
+            instance.pause();
+          } catch {
+            // Короткий эффект может уже завершиться.
+          }
+        }
+
+        this.activeSfx.clear();
+
+        const audioContext = this.audioContext;
+
+        if (audioContext && audioContext.state === 'running') {
+          audioContext.suspend().catch(() => null);
+        }
+      }
+
+      resumeAfterPageShow() {
+        if (!this.pageSuspended) {
+          return;
+        }
+
+        this.pageSuspended = false;
+        this.resumeAudioContext();
+        this.syncDesiredMusic();
+      }
+
+      playSfx(name) {
+        if (this.isEffectivelyMuted || this.pageSuspended) {
+          return;
+        }
+
+        const source = this.sfx[name];
+
+        if (!source) {
+          this.synthesizeSfx(name);
+          return;
+        }
+
+        try {
+          const instance = source.cloneNode(true);
+          instance.loop = false;
+          instance.volume = clamp(this.effectiveVolume * 0.85, 0, 1);
+          this.activeSfx.add(instance);
+
+          let released = false;
+          const releaseTimer = window.setTimeout(() => {
+            release();
+          }, 10000);
+
+          const release = () => {
+            if (released) {
+              return;
+            }
+
+            released = true;
+            window.clearTimeout(releaseTimer);
+            this.activeSfx.delete(instance);
+          };
+
+          instance.addEventListener('ended', release, { once: true });
+          instance.addEventListener('error', release, { once: true });
+
+          const playPromise = instance.play();
+
+          if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+              release();
+              this.synthesizeSfx(name);
+            });
+          }
+        } catch {
+          this.synthesizeSfx(name);
+        }
+      }
+
+      synthesizeSfx(name) {
+        if (this.isEffectivelyMuted || this.pageSuspended) {
+          return;
+        }
+
+        const audioContext = this.getAudioContext();
+
+        if (!audioContext) {
+          return;
+        }
+
+        const play = () => {
+          try {
+            const now = audioContext.currentTime;
+
+            if (name === 'complete') {
+              this.playSynthTone(523.25, 659.25, now, 0.16, 'sine', 0.12);
+              this.playSynthTone(659.25, 783.99, now + 0.11, 0.18, 'sine', 0.11);
+              this.playSynthTone(783.99, 1046.5, now + 0.23, 0.28, 'triangle', 0.1);
+            } else if (name === 'pear') {
+              this.playSynthTone(660, 920, now, 0.13, 'sine', 0.11);
+              this.playSynthTone(990, 1180, now + 0.035, 0.09, 'triangle', 0.055);
+            } else {
+              this.playSynthTone(360, 480, now, 0.09, 'sine', 0.08);
+            }
+          } catch {
+            // Синтезированный звук также остаётся необязательным.
+          }
+        };
+
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().then(play).catch(() => null);
+        } else {
+          play();
+        }
+      }
+
+      playSynthTone(
+        startFrequency,
+        endFrequency,
+        startTime,
+        duration,
+        oscillatorType,
+        gainAmount
+      ) {
+        const audioContext = this.audioContext;
+
+        if (!audioContext) {
+          return;
+        }
+
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const finalGain = clamp(
+          gainAmount * this.effectiveVolume,
+          0.0001,
+          0.25
+        );
+
+        oscillator.type = oscillatorType;
+        oscillator.frequency.setValueAtTime(startFrequency, startTime);
+        oscillator.frequency.exponentialRampToValueAtTime(
+          Math.max(1, endFrequency),
+          startTime + duration
+        );
+
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(
+          finalGain,
+          startTime + 0.012
+        );
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          startTime + duration
+        );
+
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + duration + 0.02);
+      }
+    }
+
+    const audioController = new AudioController(audioFiles);
+
+    function configureContexts() {
+      const scaleX = canvas.width / LOGICAL_WIDTH;
+      const scaleY = canvas.height / LOGICAL_HEIGHT;
+
+      ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      hudCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+      hudCtx.imageSmoothingEnabled = true;
+      hudCtx.imageSmoothingQuality = 'high';
+    }
+
+    function getViewportMetrics() {
+      const viewport = window.visualViewport;
+
+      if (viewport) {
+        return {
+          width: Math.max(1, viewport.width),
+          height: Math.max(1, viewport.height),
+          left: viewport.offsetLeft,
+          top: viewport.offsetTop
+        };
+      }
+
+      return {
+        width: Math.max(1, window.innerWidth),
+        height: Math.max(1, window.innerHeight),
+        left: 0,
+        top: 0
+      };
+    }
+
+    function resizeCanvas() {
+      const viewport = getViewportMetrics();
+      const cssScale = Math.min(
+        viewport.width / LOGICAL_WIDTH,
+        viewport.height / LOGICAL_HEIGHT
+      );
+
+      const displayWidth = LOGICAL_WIDTH * cssScale;
+      const displayHeight = LOGICAL_HEIGHT * cssScale;
+
+      const displayLeft = viewport.left + (viewport.width - displayWidth) / 2;
+      const displayTop = viewport.top + (viewport.height - displayHeight) / 2;
+
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+      canvas.style.left = `${displayLeft}px`;
+      canvas.style.top = `${displayTop}px`;
+
+      audioHudCanvas.style.width = `${displayWidth}px`;
+      audioHudCanvas.style.height = `${displayHeight}px`;
+      audioHudCanvas.style.left = `${displayLeft}px`;
+      audioHudCanvas.style.top = `${displayTop}px`;
+
+      startScreen.style.width = `${displayWidth}px`;
+      startScreen.style.height = `${displayHeight}px`;
+      startScreen.style.left = `${displayLeft}px`;
+      startScreen.style.top = `${displayTop}px`;
+
+      const devicePixelRatio = Math.max(window.devicePixelRatio || 1, 1);
+      const backingScale = Math.min(
+        MAX_BACKING_SCALE,
+        Math.max(0.05, cssScale * devicePixelRatio)
+      );
+
+      const targetWidth = Math.max(1, Math.round(LOGICAL_WIDTH * backingScale));
+      const targetHeight = Math.max(1, Math.round(LOGICAL_HEIGHT * backingScale));
+
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }
+
+      if (
+        audioHudCanvas.width !== targetWidth ||
+        audioHudCanvas.height !== targetHeight
+      ) {
+        audioHudCanvas.width = targetWidth;
+        audioHudCanvas.height = targetHeight;
+      }
+
+      configureContexts();
+    }
+
+    function screenToGame(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+
+      if (rect.width <= 0 || rect.height <= 0) {
+        return null;
+      }
+
+      const normalizedX = (clientX - rect.left) / rect.width;
+      const normalizedY = (clientY - rect.top) / rect.height;
+
+      if (
+        normalizedX < 0 ||
+        normalizedX > 1 ||
+        normalizedY < 0 ||
+        normalizedY > 1
+      ) {
+        return null;
+      }
+
+      return {
+        x: normalizedX * LOGICAL_WIDTH,
+        y: normalizedY * LOGICAL_HEIGHT
+      };
+    }
+
+    function loadImage(path, timeoutMilliseconds = IMAGE_LOAD_TIMEOUT) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        let settled = false;
+
+        const timeoutId = window.setTimeout(() => {
+          finish(
+            reject,
+            new Error(
+              `Истекло время ожидания файла «${decodeURI(path)}».`
+            )
+          );
+        }, timeoutMilliseconds);
+
+        function cleanup() {
+          window.clearTimeout(timeoutId);
+          image.onload = null;
+          image.onerror = null;
+        }
+
+        function finish(callback, value) {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          cleanup();
+          callback(value);
+        }
+
+        image.decoding = 'async';
+        image.draggable = false;
+
+        image.onload = () => {
+          finish(resolve, image);
+        };
+
+        image.onerror = () => {
+          finish(
+            reject,
+            new Error(`Не удалось загрузить файл «${decodeURI(path)}».`)
+          );
+        };
+
+        image.src = path;
+      });
+    }
+
+    function loadDomImage(
+      image,
+      path,
+      timeoutMilliseconds = IMAGE_LOAD_TIMEOUT
+    ) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+
+        const timeoutId = window.setTimeout(() => {
+          finish(
+            reject,
+            new Error(
+              `Истекло время ожидания файла «${decodeURI(path)}».`
+            )
+          );
+        }, timeoutMilliseconds);
+
+        function cleanup() {
+          window.clearTimeout(timeoutId);
+          image.removeEventListener('load', handleLoad);
+          image.removeEventListener('error', handleError);
+        }
+
+        function finish(callback, value) {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          cleanup();
+          callback(value);
+        }
+
+        function handleLoad() {
+          if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+            handleError();
+            return;
+          }
+
+          finish(resolve, image);
+        }
+
+        function handleError() {
+          finish(
+            reject,
+            new Error(`Не удалось загрузить файл «${decodeURI(path)}».`)
+          );
+        }
+
+        image.addEventListener('load', handleLoad);
+        image.addEventListener('error', handleError);
+        image.src = path;
+      });
+    }
+
+    async function loadStartImageWithFallback() {
+      startScreen.removeAttribute('src');
+
+      try {
+        const gifImage = await loadDomImage(startScreen, START_GIF_PATH);
+        startAssetSource = decodeURI(START_GIF_PATH);
+        startAssetIsGif = true;
+        return gifImage;
+      } catch (gifError) {
+        console.warn(
+          'Файл «СТАРТ.gif» не загружен. Используется резервный «СТАРТ.png».',
+          gifError
+        );
+      }
+
+      try {
+        const pngImage = await loadDomImage(startScreen, START_PNG_PATH);
+        startAssetSource = decodeURI(START_PNG_PATH);
+        startAssetIsGif = false;
+        return pngImage;
+      } catch (pngError) {
+        startScreen.removeAttribute('src');
+        throw new Error(
+          'Не удалось загрузить стартовый экран: отсутствуют или повреждены ' +
+          '«СТАРТ.gif» и «СТАРТ.png».'
+        );
+      }
+    }
+
+    function createAlphaMask(image) {
+      try {
+        const sourceWidth = image.naturalWidth;
+        const sourceHeight = image.naturalHeight;
+        const scale = Math.min(
+          1,
+          ALPHA_MASK_MAX_SIDE / Math.max(sourceWidth, sourceHeight)
+        );
+
+        const maskWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const maskHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const maskCanvas = document.createElement('canvas');
+        const maskContext = maskCanvas.getContext('2d', {
+          willReadFrequently: true
+        });
+
+        if (!maskContext) {
+          return null;
+        }
+
+        maskCanvas.width = maskWidth;
+        maskCanvas.height = maskHeight;
+        maskContext.imageSmoothingEnabled = true;
+        maskContext.imageSmoothingQuality = 'high';
+        maskContext.clearRect(0, 0, maskWidth, maskHeight);
+        maskContext.drawImage(image, 0, 0, maskWidth, maskHeight);
+
+        const rgba = maskContext.getImageData(
+          0,
+          0,
+          maskWidth,
+          maskHeight
+        ).data;
+
+        const alpha = new Uint8Array(maskWidth * maskHeight);
+
+        for (let pixel = 0; pixel < alpha.length; pixel += 1) {
+          alpha[pixel] = rgba[pixel * 4 + 3];
+        }
+
+        return {
+          width: maskWidth,
+          height: maskHeight,
+          alpha
+        };
+      } catch (error) {
+        console.warn(
+          'Pixel-perfect hit detection недоступен, используется эллиптический хитбокс.',
+          error
+        );
+        return null;
+      }
+    }
+
+    async function preloadAssets() {
+      if (isPreloading) {
+        return;
+      }
+
+      isPreloading = true;
+      assetsReady = false;
+      loadedAssets = 0;
+      loadErrors = [];
+      startAssetSource = '';
+      startAssetIsGif = false;
+      pearAlphaMask = null;
+      setStartScreenVisible(false);
+      startScreen.removeAttribute('src');
+
+      for (const key of Object.keys(images)) {
+        delete images[key];
+      }
+
+      const tasks = [
+        {
+          key: 'start',
+          load: loadStartImageWithFallback
+        },
+        ...Object.entries(assetFiles).map(([key, path]) => ({
+          key,
+          load: () => loadImage(path)
+        }))
+      ];
+
+      try {
+        const results = await Promise.all(
+          tasks.map(async task => {
+            try {
+              const image = await task.load();
+              return { key: task.key, image, error: null };
+            } catch (error) {
+              return {
+                key: task.key,
+                image: null,
+                error: error instanceof Error ? error.message : String(error)
+              };
+            } finally {
+              loadedAssets += 1;
+            }
+          })
+        );
+
+        loadErrors = results
+          .filter(result => result.error)
+          .map(result => result.error);
+
+        if (loadErrors.length > 0) {
+          return;
+        }
+
+        for (const result of results) {
+          images[result.key] = result.image;
+        }
+
+        validateAssets();
+        pearAlphaMask = createAlphaMask(images.pear);
+        resetRunData();
+        assetsReady = true;
+        state = STATE_START;
+        syncStartScreenVisibility();
+      } finally {
+        isPreloading = false;
+      }
+    }
+
+    function validateAssets() {
+      const backgroundEntries = [
+        ['start', startAssetSource || 'стартовый экран'],
+        ['level', 'игровой-уровень.png'],
+        ['end', 'конец-игры.png']
+      ];
+
+      console.info(
+        `Стартовый экран: ${startAssetSource}` +
+        (startAssetIsGif ? ' (анимированный GIF)' : ' (статический PNG)')
+      );
+
+      for (const [key, label] of backgroundEntries) {
+        const image = images[key];
+
+        if (
+          image.naturalWidth !== LOGICAL_WIDTH ||
+          image.naturalHeight !== LOGICAL_HEIGHT
+        ) {
+          console.warn(
+            `${label}: ожидалось ${LOGICAL_WIDTH}x${LOGICAL_HEIGHT}, ` +
+            `получено ${image.naturalWidth}x${image.naturalHeight}.`
+          );
+        }
+      }
+
+      if (
+        images.pear.naturalWidth !== images.pearColor.naturalWidth ||
+        images.pear.naturalHeight !== images.pearColor.naturalHeight
+      ) {
+        console.warn(
+          'Размеры «груша.png» и «груша-цвет.png» различаются. ' +
+          'Цветной вариант будет приведён к размеру обычного.'
+        );
+      }
+    }
+
+    function randomRange(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function randomBoolean() {
+      return Math.random() < 0.5;
+    }
+
+    function degreesToRadians(degrees) {
+      return degrees * Math.PI / 180;
+    }
+
+    function shuffle(array) {
+      for (let index = array.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        [array[index], array[randomIndex]] = [array[randomIndex], array[index]];
+      }
+
+      return array;
+    }
+
+    function getPearSize() {
+      const sourceWidth = images.pear.naturalWidth;
+      const sourceHeight = images.pear.naturalHeight;
+
+      if (sourceWidth >= sourceHeight) {
+        return {
+          width: PEAR_MAX_SIDE,
+          height: PEAR_MAX_SIDE * sourceHeight / sourceWidth
+        };
+      }
+
+      return {
+        width: PEAR_MAX_SIDE * sourceWidth / sourceHeight,
+        height: PEAR_MAX_SIDE
+      };
+    }
+
+    function getRotatedHalfExtents(width, height, angle) {
+      const cosine = Math.abs(Math.cos(angle));
+      const sine = Math.abs(Math.sin(angle));
+
+      return {
+        halfWidth: cosine * width / 2 + sine * height / 2,
+        halfHeight: sine * width / 2 + cosine * height / 2
+      };
+    }
+
+    function rectanglesOverlap(first, second) {
+      return (
+        first.x < second.x + second.width &&
+        first.x + first.width > second.x &&
+        first.y < second.y + second.height &&
+        first.y + first.height > second.y
+      );
+    }
+
+    function createPear(id, x, y, width, height, angle, flipX, flipY) {
+      return {
+        id,
+        x,
+        y,
+        width,
+        height,
+        angle,
+        flipX,
+        flipY,
+        isFound: false,
+        foundAt: 0
+      };
+    }
+
+    function isCandidateValid(candidate, placedPears) {
+      const extents = getRotatedHalfExtents(
+        candidate.width,
+        candidate.height,
+        candidate.angle
+      );
+
+      const candidateRect = {
+        x: candidate.x - extents.halfWidth,
+        y: candidate.y - extents.halfHeight,
+        width: extents.halfWidth * 2,
+        height: extents.halfHeight * 2
+      };
+
+      if (
+        rectanglesOverlap(candidateRect, HUD_RECT) ||
+        rectanglesOverlap(candidateRect, MUTE_BUTTON_SPAWN_BLOCK_RECT)
+      ) {
+        return false;
+      }
+
+      for (const other of placedPears) {
+        const distance = Math.hypot(
+          candidate.x - other.x,
+          candidate.y - other.y
+        );
+
+        if (distance < MIN_CENTER_DISTANCE) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    function buildRandomCandidate(id, width, height) {
+      const angle = degreesToRadians(randomRange(-35, 35));
+      const flipX = randomBoolean();
+      const flipY = randomBoolean();
+      const extents = getRotatedHalfExtents(width, height, angle);
+      const minX = EDGE_MARGIN + extents.halfWidth;
+      const maxX = LOGICAL_WIDTH - EDGE_MARGIN - extents.halfWidth;
+      const minY = EDGE_MARGIN + extents.halfHeight;
+      const maxY = LOGICAL_HEIGHT - EDGE_MARGIN - extents.halfHeight;
+
+      return createPear(
+        id,
+        randomRange(minX, maxX),
+        randomRange(minY, maxY),
+        width,
+        height,
+        angle,
+        flipX,
+        flipY
+      );
+    }
+
+    function tryCreateRandomLayout(width, height) {
+      const result = [];
+
+      for (let id = 0; id < PEAR_COUNT; id += 1) {
+        let placed = null;
+
+        for (let attempt = 0; attempt < POSITION_ATTEMPTS; attempt += 1) {
+          const candidate = buildRandomCandidate(id, width, height);
+
+          if (isCandidateValid(candidate, result)) {
+            placed = candidate;
+            break;
+          }
+        }
+
+        if (!placed) {
+          return null;
+        }
+
+        result.push(placed);
+      }
+
+      return result;
+    }
+
+    function createGuaranteedFallbackLayout(width, height) {
+      const basePoints = shuffle([
+        { x: 220, y: 300 },
+        { x: 590, y: 300 },
+        { x: 960, y: 300 },
+        { x: 1330, y: 300 },
+        { x: 1700, y: 300 },
+        { x: 220, y: 780 },
+        { x: 590, y: 780 },
+        { x: 960, y: 780 },
+        { x: 1330, y: 780 },
+        { x: 1700, y: 780 }
+      ]);
+
+      const result = [];
+
+      for (let id = 0; id < basePoints.length; id += 1) {
+        const point = basePoints[id];
+        let selected = null;
+
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const angle = degreesToRadians(randomRange(-35, 35));
+          const extents = getRotatedHalfExtents(width, height, angle);
+          const minX = EDGE_MARGIN + extents.halfWidth;
+          const maxX = LOGICAL_WIDTH - EDGE_MARGIN - extents.halfWidth;
+          const minY = EDGE_MARGIN + extents.halfHeight;
+          const maxY = LOGICAL_HEIGHT - EDGE_MARGIN - extents.halfHeight;
+
+          const candidate = createPear(
+            id,
+            Math.max(minX, Math.min(maxX, point.x + randomRange(-35, 35))),
+            Math.max(minY, Math.min(maxY, point.y + randomRange(-35, 35))),
+            width,
+            height,
+            angle,
+            randomBoolean(),
+            randomBoolean()
+          );
+
+          if (isCandidateValid(candidate, result)) {
+            selected = candidate;
+            break;
+          }
+        }
+
+        if (!selected) {
+          const candidate = createPear(
+            id,
+            point.x,
+            point.y,
+            width,
+            height,
+            0,
+            randomBoolean(),
+            randomBoolean()
+          );
+
+          if (!isCandidateValid(candidate, result)) {
+            return null;
+          }
+
+          selected = candidate;
+        }
+
+        result.push(selected);
+      }
+
+      return result;
+    }
+
+    function spawnPears() {
+      const size = getPearSize();
+
+      for (let layoutAttempt = 0; layoutAttempt < LAYOUT_ATTEMPTS; layoutAttempt += 1) {
+        const layout = tryCreateRandomLayout(size.width, size.height);
+
+        if (layout) {
+          pears = layout;
+          return;
+        }
+      }
+
+      console.warn(
+        'Случайная расстановка не удалась. Использована гарантированная сетка.'
+      );
+
+      const fallbackLayout = createGuaranteedFallbackLayout(
+        size.width,
+        size.height
+      );
+
+      if (!fallbackLayout) {
+        throw new Error('Не удалось создать безопасную расстановку предметов.');
+      }
+
+      pears = fallbackLayout;
+    }
+
+    function setStartScreenVisible(visible) {
+      if (startScreenVisible === visible) {
+        return;
+      }
+
+      startScreenVisible = visible;
+      startScreen.style.display = visible ? 'block' : 'none';
+    }
+
+    function syncStartScreenVisibility() {
+      setStartScreenVisible(
+        assetsReady && state === STATE_START && startScreen.naturalWidth > 0
+      );
+    }
+
+    function resetRunData() {
+      pears = [];
+      particles = [];
+      bursts = [];
+      timerStartedAt = 0;
+      finalElapsed = 0;
+      victoryPending = false;
+      victoryTransitionAt = 0;
+    }
+
+    function focusCanvas() {
+      try {
+        canvas.focus({ preventScroll: true });
+      } catch {
+        canvas.focus();
+      }
+    }
+
+    function startGame() {
+      resetRunData();
+      spawnPears();
+      timerStartedAt = performance.now();
+      state = STATE_GAME;
+      syncStartScreenVisibility();
+      audioController.playSfx('button');
+      audioController.transitionToGame();
+      focusCanvas();
+    }
+
+    function scheduleVictory(now) {
+      if (victoryPending) {
+        return;
+      }
+
+      finalElapsed = Math.max(0, now - timerStartedAt);
+      victoryPending = true;
+      victoryTransitionAt = now + VICTORY_DELAY;
+    }
+
+    function completeVictoryTransition() {
+      pears = [];
+      particles = [];
+      bursts = [];
+      victoryPending = false;
+      victoryTransitionAt = 0;
+      state = STATE_END;
+      syncStartScreenVisibility();
+    }
+
+    function returnToStart() {
+      resetRunData();
+      state = STATE_START;
+      syncStartScreenVisibility();
+      audioController.enterStart();
+    }
+
+    function formatTime(milliseconds) {
+      const total = Math.max(0, Math.floor(milliseconds));
+      const minutes = Math.floor(total / 60000);
+      const seconds = Math.floor((total % 60000) / 1000);
+      const millis = total % 1000;
+
+      return (
+        `${String(minutes).padStart(2, '0')}:` +
+        `${String(seconds).padStart(2, '0')}.` +
+        `${String(millis).padStart(3, '0')}`
+      );
+    }
+
+    function drawBackground(image) {
+      ctx.drawImage(
+        image,
+        0,
+        0,
+        LOGICAL_WIDTH,
+        LOGICAL_HEIGHT
+      );
+    }
+
+    function getPopScale(pear, now) {
+      if (!pear.isFound || pear.foundAt <= 0) {
+        return 1;
+      }
+
+      const progress = Math.min(
+        1,
+        Math.max(0, (now - pear.foundAt) / POP_DURATION)
+      );
+
+      if (progress >= 1) {
+        return 1;
+      }
+
+      return 1 + Math.sin(progress * Math.PI) * 0.22 * (1 - progress * 0.25);
+    }
+
+    function drawPear(pear, now) {
+      const image = pear.isFound ? images.pearColor : images.pear;
+      const popScale = getPopScale(pear, now);
+
+      ctx.save();
+      ctx.translate(pear.x, pear.y);
+      ctx.rotate(pear.angle);
+      ctx.scale(
+        (pear.flipX ? -1 : 1) * popScale,
+        (pear.flipY ? -1 : 1) * popScale
+      );
+      ctx.drawImage(
+        image,
+        -pear.width / 2,
+        -pear.height / 2,
+        pear.width,
+        pear.height
+      );
+      ctx.restore();
+    }
+
+    function drawStar(x, y, outerRadius, innerRadius, rotation) {
+      const points = 5;
+      const step = Math.PI / points;
+
+      ctx.beginPath();
+
+      for (let index = 0; index < points * 2; index += 1) {
+        const radius = index % 2 === 0 ? outerRadius : innerRadius;
+        const angle = rotation - Math.PI / 2 + index * step;
+        const pointX = x + Math.cos(angle) * radius;
+        const pointY = y + Math.sin(angle) * radius;
+
+        if (index === 0) {
+          ctx.moveTo(pointX, pointY);
+        } else {
+          ctx.lineTo(pointX, pointY);
+        }
+      }
+
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function spawnFindEffects(pear, now) {
+      bursts.push({
+        x: pear.x,
+        y: pear.y,
+        createdAt: now,
+        duration: EFFECT_DURATION
+      });
+
+      const particleCount = 22;
+
+      for (let index = 0; index < particleCount; index += 1) {
+        const direction = randomRange(0, Math.PI * 2);
+        const speed = randomRange(150, 390);
+
+        particles.push({
+          x: pear.x,
+          y: pear.y,
+          velocityX: Math.cos(direction) * speed,
+          velocityY: Math.sin(direction) * speed - randomRange(15, 90),
+          gravity: randomRange(150, 280),
+          size: randomRange(5, 11),
+          rotation: randomRange(0, Math.PI * 2),
+          spin: randomRange(-8, 8),
+          createdAt: now,
+          duration: EFFECT_DURATION,
+          isStar: index % 3 !== 0
+        });
+      }
+    }
+
+    function drawBurst(burst, now) {
+      const progress = (now - burst.createdAt) / burst.duration;
+
+      if (progress < 0 || progress >= 1) {
+        return false;
+      }
+
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const radius = 28 + eased * 72;
+      const alpha = (1 - progress) * 0.8;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#ffd75a';
+      ctx.lineWidth = 8 * (1 - progress) + 2;
+      ctx.shadowColor = '#fff2a0';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      return true;
+    }
+
+    function drawParticle(particle, now) {
+      const ageMilliseconds = now - particle.createdAt;
+      const progress = ageMilliseconds / particle.duration;
+
+      if (progress < 0 || progress >= 1) {
+        return false;
+      }
+
+      const ageSeconds = ageMilliseconds / 1000;
+      const x = particle.x + particle.velocityX * ageSeconds;
+      const y = particle.y +
+        particle.velocityY * ageSeconds +
+        particle.gravity * ageSeconds * ageSeconds / 2;
+      const rotation = particle.rotation + particle.spin * ageSeconds;
+      const alpha = 1 - progress;
+      const scale = 0.55 + (1 - progress) * 0.75;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = progress < 0.45 ? '#fff2a0' : '#f5b82e';
+      ctx.shadowColor = '#ffd75a';
+      ctx.shadowBlur = 12;
+
+      if (particle.isStar) {
+        drawStar(
+          x,
+          y,
+          particle.size * scale,
+          particle.size * 0.45 * scale,
+          rotation
+        );
+      } else {
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+        ctx.fillRect(
+          -particle.size * 0.22,
+          -particle.size * 1.05,
+          particle.size * 0.44,
+          particle.size * 2.1
+        );
+      }
+
+      ctx.restore();
+      return true;
+    }
+
+    function drawEffects(now) {
+      bursts = bursts.filter(burst => drawBurst(burst, now));
+      particles = particles.filter(particle => drawParticle(particle, now));
+    }
+
+    function getCurrentElapsed(now) {
+      if (victoryPending) {
+        return finalElapsed;
+      }
+
+      return Math.max(0, now - timerStartedAt);
+    }
+
+    function drawGameTimer(now) {
+      const text = formatTime(getCurrentElapsed(now));
+
+      ctx.save();
+      ctx.font = '700 34px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      const textWidth = ctx.measureText(text).width;
+      const right = HUD_RECT.x + HUD_RECT.width - 18;
+      const centerY = HUD_RECT.y + HUD_RECT.height / 2;
+
+      ctx.fillStyle = 'rgba(20, 28, 24, 0.62)';
+      ctx.fillRect(
+        right - textWidth - 24,
+        HUD_RECT.y + 9,
+        textWidth + 42,
+        HUD_RECT.height - 18
+      );
+
+      ctx.shadowColor = 'rgba(238, 255, 92, 0.8)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#f1ff58';
+      ctx.fillText(text, right, centerY);
+      ctx.restore();
+    }
+
+    function drawFinalTime() {
+      const text = formatTime(finalElapsed);
+
+      ctx.save();
+      ctx.font = '900 96px Arial, Helvetica, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 18;
+      ctx.strokeStyle = 'rgba(55, 30, 32, 0.96)';
+      ctx.strokeText(text, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2);
+      ctx.fillStyle = '#fff1bd';
+      ctx.fillText(text, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2);
+      ctx.restore();
+    }
+
+    function showVolumeHud() {
+      volumeHudVisibleUntil = performance.now() + VOLUME_HUD_DURATION;
+    }
+
+    function drawRoundedRect(context, x, y, width, height, radius) {
+      const safeRadius = Math.min(radius, width / 2, height / 2);
+
+      context.beginPath();
+      context.moveTo(x + safeRadius, y);
+      context.arcTo(x + width, y, x + width, y + height, safeRadius);
+      context.arcTo(
+        x + width,
+        y + height,
+        x,
+        y + height,
+        safeRadius
+      );
+      context.arcTo(x, y + height, x, y, safeRadius);
+      context.arcTo(x, y, x + width, y, safeRadius);
+      context.closePath();
+    }
+
+    function drawSpeakerIcon(context, centerX, centerY, size, muted) {
+      const half = size / 2;
+      const left = centerX - half;
+      const top = centerY - half;
+
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = '#fff6b3';
+      context.fillStyle = '#fff6b3';
+      context.lineWidth = Math.max(4, size * 0.075);
+      context.shadowColor = 'rgba(255, 214, 72, 0.65)';
+      context.shadowBlur = 10;
+
+      context.beginPath();
+      context.rect(left + size * 0.12, top + size * 0.36, size * 0.2, size * 0.28);
+      context.fill();
+
+      context.beginPath();
+      context.moveTo(left + size * 0.31, top + size * 0.36);
+      context.lineTo(left + size * 0.58, top + size * 0.16);
+      context.lineTo(left + size * 0.58, top + size * 0.84);
+      context.lineTo(left + size * 0.31, top + size * 0.64);
+      context.closePath();
+      context.fill();
+
+      if (muted) {
+        context.beginPath();
+        context.moveTo(left + size * 0.68, top + size * 0.34);
+        context.lineTo(left + size * 0.9, top + size * 0.66);
+        context.moveTo(left + size * 0.9, top + size * 0.34);
+        context.lineTo(left + size * 0.68, top + size * 0.66);
+        context.stroke();
+      } else {
+        context.beginPath();
+        context.arc(
+          left + size * 0.57,
+          centerY,
+          size * 0.2,
+          -Math.PI / 3,
+          Math.PI / 3
+        );
+        context.stroke();
+
+        context.beginPath();
+        context.arc(
+          left + size * 0.57,
+          centerY,
+          size * 0.34,
+          -Math.PI / 3,
+          Math.PI / 3
+        );
+        context.stroke();
+      }
+
+      context.restore();
+    }
+
+    function drawMuteButton() {
+      const rect = MUTE_BUTTON_RECT;
+      const muted = audioController.isEffectivelyMuted;
+
+      hudCtx.save();
+      drawRoundedRect(
+        hudCtx,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        26
+      );
+      hudCtx.fillStyle = 'rgba(18, 23, 21, 0.68)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = 'rgba(255, 245, 166, 0.72)';
+      hudCtx.stroke();
+      hudCtx.restore();
+
+      drawSpeakerIcon(
+        hudCtx,
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+        70,
+        muted
+      );
+    }
+
+    function drawVolumePopup(now) {
+      if (now >= volumeHudVisibleUntil) {
+        return;
+      }
+
+      const remaining = volumeHudVisibleUntil - now;
+      const alpha = remaining < VOLUME_HUD_FADE_DURATION
+        ? remaining / VOLUME_HUD_FADE_DURATION
+        : 1;
+      const percent = Math.round(audioController.globalVolume * 100);
+      const text = `Громкость: ${percent}%`;
+      const width = 520;
+      const height = 84;
+      const x = (LOGICAL_WIDTH - width) / 2;
+      const y = 36;
+
+      hudCtx.save();
+      hudCtx.globalAlpha = clamp(alpha, 0, 1);
+      drawRoundedRect(hudCtx, x, y, width, height, 28);
+      hudCtx.fillStyle = 'rgba(16, 22, 19, 0.82)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = 'rgba(255, 235, 112, 0.8)';
+      hudCtx.stroke();
+
+      hudCtx.font = '700 34px Arial, Helvetica, sans-serif';
+      hudCtx.textAlign = 'left';
+      hudCtx.textBaseline = 'middle';
+      hudCtx.fillStyle = '#fff4a8';
+      hudCtx.shadowColor = 'rgba(255, 214, 72, 0.6)';
+      hudCtx.shadowBlur = 9;
+      hudCtx.fillText(text, x + 116, y + height / 2 + 1);
+      hudCtx.restore();
+
+      hudCtx.save();
+      hudCtx.globalAlpha = clamp(alpha, 0, 1);
+      drawSpeakerIcon(
+        hudCtx,
+        x + 68,
+        y + height / 2,
+        48,
+        audioController.isEffectivelyMuted
+      );
+      hudCtx.restore();
+    }
+
+    function drawAudioHud(now) {
+      hudCtx.save();
+      hudCtx.setTransform(1, 0, 0, 1, 0, 0);
+      hudCtx.clearRect(0, 0, audioHudCanvas.width, audioHudCanvas.height);
+      hudCtx.restore();
+
+      drawMuteButton();
+      drawVolumePopup(now);
+    }
+
+    function pointIsInsideMuteButton(point) {
+      return (
+        point.x >= MUTE_BUTTON_HIT_RECT.x &&
+        point.x <= MUTE_BUTTON_HIT_RECT.x + MUTE_BUTTON_HIT_RECT.width &&
+        point.y >= MUTE_BUTTON_HIT_RECT.y &&
+        point.y <= MUTE_BUTTON_HIT_RECT.y + MUTE_BUTTON_HIT_RECT.height
+      );
+    }
+
+    function drawLoadingScreen() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      if (loadErrors.length > 0 && !isPreloading) {
+        ctx.fillStyle = '#ff6868';
+        ctx.font = '700 42px Arial, Helvetica, sans-serif';
+        ctx.fillText(
+          'Ошибка загрузки ресурсов',
+          LOGICAL_WIDTH / 2,
+          LOGICAL_HEIGHT / 2 - 100
+        );
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '26px Arial, Helvetica, sans-serif';
+
+        loadErrors.slice(0, 5).forEach((message, index) => {
+          ctx.fillText(
+            message,
+            LOGICAL_WIDTH / 2,
+            LOGICAL_HEIGHT / 2 - 38 + index * 38
+          );
+        });
+
+        ctx.fillStyle = '#f1ff58';
+        ctx.font = '700 30px Arial, Helvetica, sans-serif';
+        ctx.fillText(
+          'Нажмите на экран или Enter, чтобы повторить загрузку',
+          LOGICAL_WIDTH / 2,
+          LOGICAL_HEIGHT / 2 + 190
+        );
+
+        ctx.restore();
+        return;
+      }
+
+      const totalAssets = LOGICAL_ASSET_COUNT;
+      const progress = totalAssets > 0 ? loadedAssets / totalAssets : 1;
+      const barWidth = 620;
+      const barHeight = 24;
+      const barX = (LOGICAL_WIDTH - barWidth) / 2;
+      const barY = LOGICAL_HEIGHT / 2 + 32;
+
+      ctx.fillStyle = '#f1ff58';
+      ctx.font = '700 42px Arial, Helvetica, sans-serif';
+      ctx.fillText(
+        `Загрузка ${loadedAssets} / ${totalAssets}`,
+        LOGICAL_WIDTH / 2,
+        LOGICAL_HEIGHT / 2 - 28
+      );
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      ctx.fillStyle = '#f1ff58';
+      ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+      ctx.restore();
+    }
+
+    function render(now) {
+      syncStartScreenVisibility();
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+
+      if (!assetsReady) {
+        drawLoadingScreen();
+        drawAudioHud(now);
+        requestAnimationFrame(render);
+        return;
+      }
+
+      switch (state) {
+        case STATE_START:
+          // GIF/PNG отображается HTML-элементом поверх Canvas.
+          // Браузер сам декодирует и воспроизводит анимированный GIF.
+          break;
+
+        case STATE_GAME:
+          drawBackground(images.level);
+
+          for (const pear of pears) {
+            drawPear(pear, now);
+          }
+
+          drawEffects(now);
+          drawGameTimer(now);
+
+          if (victoryPending && now >= victoryTransitionAt) {
+            completeVictoryTransition();
+          }
+          break;
+
+        case STATE_END:
+          drawBackground(images.end);
+          drawFinalTime();
+          break;
+
+        default:
+          returnToStart();
+          break;
+      }
+
+      drawAudioHud(now);
+      requestAnimationFrame(render);
+    }
+
+    function pointHitsPearPixelPerfect(point, pear) {
+      const dx = point.x - pear.x;
+      const dy = point.y - pear.y;
+      const cosine = Math.cos(pear.angle);
+      const sine = Math.sin(pear.angle);
+
+      let localX = dx * cosine + dy * sine;
+      let localY = -dx * sine + dy * cosine;
+
+      if (pear.flipX) {
+        localX *= -1;
+      }
+
+      if (pear.flipY) {
+        localY *= -1;
+      }
+
+      const normalizedX = (localX + pear.width / 2) / pear.width;
+      const normalizedY = (localY + pear.height / 2) / pear.height;
+
+      if (
+        normalizedX < 0 ||
+        normalizedX >= 1 ||
+        normalizedY < 0 ||
+        normalizedY >= 1
+      ) {
+        return false;
+      }
+
+      if (!pearAlphaMask) {
+        const ellipseX = (normalizedX - 0.5) / 0.46;
+        const ellipseY = (normalizedY - 0.54) / 0.48;
+        return ellipseX * ellipseX + ellipseY * ellipseY <= 1;
+      }
+
+      const pixelX = Math.min(
+        pearAlphaMask.width - 1,
+        Math.floor(normalizedX * pearAlphaMask.width)
+      );
+      const pixelY = Math.min(
+        pearAlphaMask.height - 1,
+        Math.floor(normalizedY * pearAlphaMask.height)
+      );
+      const alpha = pearAlphaMask.alpha[
+        pixelY * pearAlphaMask.width + pixelX
+      ];
+
+      return alpha >= ALPHA_THRESHOLD;
+    }
+
+    function findHitPear(point) {
+      for (let index = pears.length - 1; index >= 0; index -= 1) {
+        const pear = pears[index];
+
+        if (pear.isFound) {
+          continue;
+        }
+
+        if (pointHitsPearPixelPerfect(point, pear)) {
+          return pear;
+        }
+      }
+
+      return null;
+    }
+
+    function vibrateOnSuccess() {
+      if (typeof navigator.vibrate !== 'function') {
+        return;
+      }
+
+      try {
+        navigator.vibrate(50);
+      } catch {
+        // Некоторые браузеры запрещают вибрацию несмотря на наличие API.
+      }
+    }
+
+    function retryPreloadIfNeeded() {
+      if (!assetsReady && !isPreloading && loadErrors.length > 0) {
+        preloadAssets();
+        return true;
+      }
+
+      return false;
+    }
+
+    function activateCurrentState(clientX, clientY) {
+      if (retryPreloadIfNeeded()) {
+        return;
+      }
+
+      if (!assetsReady || isPreloading) {
+        return;
+      }
+
+      if (state === STATE_START) {
+        startGame();
+        return;
+      }
+
+      if (state === STATE_END) {
+        audioController.playSfx('button');
+        returnToStart();
+        return;
+      }
+
+      if (state !== STATE_GAME || victoryPending) {
+        return;
+      }
+
+      const point = screenToGame(clientX, clientY);
+
+      if (!point) {
+        return;
+      }
+
+      const pear = findHitPear(point);
+
+      if (!pear) {
+        return;
+      }
+
+      const now = performance.now();
+      pear.isFound = true;
+      pear.foundAt = now;
+      spawnFindEffects(pear, now);
+      vibrateOnSuccess();
+      const roundComplete = pears.every(item => item.isFound);
+
+      if (roundComplete) {
+        audioController.enterEnd(true);
+        scheduleVictory(now);
+      } else {
+        audioController.playSfx('pear');
+      }
+    }
+
+    function handleGlobalPointerDown(event) {
+      if (event.isPrimary !== false) {
+        audioController.unlock();
+      }
+    }
+
+    function handlePointerDown(event) {
+      event.preventDefault();
+
+      if (event.isPrimary === false) {
+        return;
+      }
+
+      const point = screenToGame(event.clientX, event.clientY);
+
+      if (point && pointIsInsideMuteButton(point)) {
+        audioController.toggleMute();
+        return;
+      }
+
+      const isTouchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
+      const isInVolumeZone = point &&
+        point.x <= LOGICAL_WIDTH * VOLUME_SWIPE_ZONE_RATIO;
+
+      if (isTouchLike && isInVolumeZone) {
+        volumeGesture = {
+          pointerId: event.pointerId,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          latestClientX: event.clientX,
+          latestClientY: event.clientY,
+          startVolume: audioController.globalVolume,
+          moved: false
+        };
+
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture может отсутствовать в старых браузерах.
+        }
+
+        return;
+      }
+
+      activateCurrentState(event.clientX, event.clientY);
+    }
+
+    function handlePointerMove(event) {
+      if (!volumeGesture || volumeGesture.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      volumeGesture.latestClientX = event.clientX;
+      volumeGesture.latestClientY = event.clientY;
+
+      const distance = Math.hypot(
+        event.clientX - volumeGesture.startClientX,
+        event.clientY - volumeGesture.startClientY
+      );
+
+      if (distance >= VOLUME_SWIPE_THRESHOLD) {
+        volumeGesture.moved = true;
+      }
+
+      if (!volumeGesture.moved) {
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const travel = Math.max(
+        120,
+        rect.height * VOLUME_SWIPE_TRAVEL_RATIO
+      );
+      const delta = (
+        volumeGesture.startClientY - event.clientY
+      ) / travel;
+
+      audioController.setGlobalVolume(
+        volumeGesture.startVolume + delta,
+        true
+      );
+    }
+
+    function finishVolumeGesture(event, cancelled) {
+      if (!volumeGesture || volumeGesture.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      const gesture = volumeGesture;
+      volumeGesture = null;
+
+      try {
+        canvas.releasePointerCapture(event.pointerId);
+      } catch {
+        // Захват мог быть автоматически снят браузером.
+      }
+
+      if (!cancelled && !gesture.moved) {
+        activateCurrentState(event.clientX, event.clientY);
+      }
+    }
+
+    function handlePointerUp(event) {
+      finishVolumeGesture(event, false);
+    }
+
+    function handlePointerCancel(event) {
+      finishVolumeGesture(event, true);
+    }
+
+    function handleWheel(event) {
+      event.preventDefault();
+      audioController.changeVolume(
+        event.deltaY < 0 ? VOLUME_STEP : -VOLUME_STEP
+      );
+    }
+
+    function handleKeyDown(event) {
+      if (event.code !== 'Enter' && event.code !== 'Space') {
+        return;
+      }
+
+      audioController.unlock();
+
+      if (retryPreloadIfNeeded()) {
+        event.preventDefault();
+        return;
+      }
+
+      if (!assetsReady || isPreloading) {
+        return;
+      }
+
+      if (state === STATE_START) {
+        event.preventDefault();
+        startGame();
+      } else if (state === STATE_END) {
+        event.preventDefault();
+        audioController.playSfx('button');
+        returnToStart();
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        audioController.suspendForPageHide();
+      } else {
+        audioController.resumeAfterPageShow();
+      }
+    }
+
+    function preventDefault(event) {
+      event.preventDefault();
+    }
+
+    window.addEventListener('pointerdown', handleGlobalPointerDown, {
+      capture: true,
+      passive: true
+    });
+
+    canvas.addEventListener('pointerdown', handlePointerDown, {
+      passive: false
+    });
+    canvas.addEventListener('pointermove', handlePointerMove, {
+      passive: false
+    });
+    canvas.addEventListener('pointerup', handlePointerUp, {
+      passive: false
+    });
+    canvas.addEventListener('pointercancel', handlePointerCancel, {
+      passive: false
+    });
+    canvas.addEventListener('wheel', handleWheel, {
+      passive: false
+    });
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    canvas.addEventListener('contextmenu', preventDefault);
+    canvas.addEventListener('dragstart', preventDefault);
+
+    window.addEventListener('resize', resizeCanvas, { passive: true });
+    window.addEventListener('orientationchange', resizeCanvas, { passive: true });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', resizeCanvas, {
+        passive: true
+      });
+      window.visualViewport.addEventListener('scroll', resizeCanvas, {
+        passive: true
+      });
+    }
+
+    resizeCanvas();
+    audioController.initialize();
+    audioController.enterStart();
+    preloadAssets();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
