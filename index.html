@@ -8,8 +8,23 @@
   >
   <meta name="theme-color" content="#000000">
   <title>Поиск предметов</title>
+  <link
+    rel="preload"
+    href="Caveat-VariableFont_wght.ttf"
+    as="font"
+    type="font/ttf"
+    crossorigin="anonymous"
+  >
 
   <style>
+    @font-face {
+      font-family: "PearSketch";
+      src: url("Caveat-VariableFont_wght.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+    }
+
     * {
       box-sizing: border-box;
     }
@@ -130,16 +145,23 @@
     const PENALTY_TEXT_MAX_COUNT = 8;
     const HINT_COOLDOWN_MS = 15000;
     const HINT_EFFECT_DURATION = 1500;
+    const HINT_TUTORIAL_STORAGE_KEY = 'pear_game_hint_tutorial_done';
+    const HINT_TUTORIAL_DELAY_MS = 5000;
+    const HINT_TUTORIAL_PULSE_PERIOD_MS = 1100;
+    const PAUSE_EXIT_CONFIRM_MS = 2000;
+    const VOLUME_SWIPE_MIN_LOGICAL_Y = 170;
     const FIREWORK_MAX_SPAWNS_PER_FRAME = 1;
     const FIREWORK_RESUME_DELAY = 260;
+    const GAME_FONT_LOAD_TIMEOUT = 2000;
+    const UI_NOTICE_DURATION = 2400;
+    const UI_NOTICE_FADE_DURATION = 420;
+    const HUD_RESTORE_EMPHASIS_DURATION = 1600;
+    const RECORD_RESOLUTION_MS = 1000;
+    const GAME_FONT_TEST_TEXT =
+      '0123456789 Груша Рекорд Подсказка Громкость Уровень';
+    const SKETCH_FONT_FAMILY =
+      '"PearSketch", "Segoe Print", "Comic Sans MS", cursive';
 
-    // Перезапуск выполняется через настоящий двухкадровый blackout:
-    // сначала браузер успевает показать непрозрачную шторку, затем под ней
-    // создаётся новая раскладка. Финальное открытие происходит мгновенным срезом,
-    // чтобы игрок не видел, как все груши одновременно проявляются из затемнения.
-    const RESTART_MIN_COVER_DURATION = 560;
-    const RESTART_POST_LAYOUT_HOLD = 120;
-    const RESTART_FAILURE_HOLD = 900;
 
     const SFX_MIN_INTERVALS = Object.freeze({
       button: 90,
@@ -156,17 +178,52 @@
     });
 
     const MUTE_BUTTON_HIT_RECT = Object.freeze({
-      x: 0,
-      y: 0,
-      width: 167,
-      height: 180
+      x: 10,
+      y: 8,
+      width: 164,
+      height: 132
+    });
+
+    const ORIENTATION_BUTTON_RECT = Object.freeze({
+      x: 176,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const ORIENTATION_BUTTON_HIT_RECT = Object.freeze({
+      x: 162,
+      y: 8,
+      width: 164,
+      height: 132
+    });
+
+    const FULLSCREEN_BUTTON_RECT = Object.freeze({
+      x: 328,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const FULLSCREEN_BUTTON_HIT_RECT = Object.freeze({
+      x: 314,
+      y: 8,
+      width: 164,
+      height: 132
     });
 
     const GAME_CONTROL_SPAWN_BLOCK_RECT = Object.freeze({
       x: 0,
       y: 0,
-      width: 190,
-      height: 180
+      width: 760,
+      height: 158
+    });
+
+    const PAUSE_CONTROL_SPAWN_BLOCK_RECT = Object.freeze({
+      x: 864,
+      y: 0,
+      width: 192,
+      height: 158
     });
 
     const HINT_BUTTON_RECT = Object.freeze({
@@ -177,21 +234,105 @@
     });
 
     const HINT_BUTTON_HIT_RECT = Object.freeze({
-      x: 0,
-      y: 0,
-      width: 167,
-      height: 180
+      x: 10,
+      y: 8,
+      width: 164,
+      height: 132
+    });
+
+    const HINT_TUTORIAL_PANEL_RECT = Object.freeze({
+      x: 188,
+      y: 26,
+      width: 548,
+      height: 96
+    });
+
+    const PAUSE_BUTTON_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 68,
+      y: 22,
+      width: 136,
+      height: 104
+    });
+
+    const PAUSE_BUTTON_HIT_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 82,
+      y: 8,
+      width: 164,
+      height: 132
+    });
+
+    const PAUSE_PANEL_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 360,
+      y: 110,
+      width: 720,
+      height: 860
+    });
+
+    const PAUSE_CONTINUE_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 250,
+      y: 300,
+      width: 500,
+      height: 82
+    });
+
+    const PAUSE_SOUND_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 250,
+      y: 398,
+      width: 500,
+      height: 82
+    });
+
+    const PAUSE_CLEAN_HUD_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 250,
+      y: 496,
+      width: 500,
+      height: 82
+    });
+
+    const PAUSE_FULLSCREEN_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 250,
+      y: 594,
+      width: 500,
+      height: 82
+    });
+
+    const PAUSE_EXIT_RECT = Object.freeze({
+      x: LOGICAL_WIDTH / 2 - 250,
+      y: 692,
+      width: 500,
+      height: 82
+    });
+
+    const HUD_RESTORE_TAB_RECT = Object.freeze({
+      x: LOGICAL_WIDTH - 72,
+      y: LOGICAL_HEIGHT / 2 - 66,
+      width: 72,
+      height: 132
+    });
+
+    const HUD_RESTORE_TAB_HIT_RECT = Object.freeze({
+      x: LOGICAL_WIDTH - 120,
+      y: LOGICAL_HEIGHT / 2 - 100,
+      width: 120,
+      height: 200
     });
 
     const STATE_START = 'STATE_START';
     const STATE_GAME = 'STATE_GAME';
-    const STATE_RESTARTING = 'STATE_RESTARTING';
+    const STATE_PAUSE = 'STATE_PAUSE';
     const STATE_END = 'STATE_END';
 
     const HUD_RECT = Object.freeze({
-      x: LOGICAL_WIDTH - 560,
+      x: LOGICAL_WIDTH - 374,
       y: 18,
-      width: 526,
+      width: 340,
+      height: 82
+    });
+
+    const HUD_HINT_RECT = Object.freeze({
+      x: LOGICAL_WIDTH - 514,
+      y: 18,
+      width: 480,
       height: 82
     });
 
@@ -269,22 +410,402 @@
     let hintedPearId = null;
     let hintEffectUntil = 0;
     let usedHintThisRound = false;
+    let hintTutorialDone = loadHintTutorialDone();
+    let hintTutorialShowAt = Infinity;
+    let pauseExitConfirmUntil = 0;
+    let cleanHudEnabled = false;
+
+    let gameClockStartedAtReal = 0;
+    let gameClockPausedAtReal = 0;
+    let gameClockPausedTotal = 0;
+    const gameClockPauseReasons = new Set();
 
     let volumeHudVisibleUntil = 0;
     let volumeGesture = null;
     let pageHiddenAt = 0;
 
-    let restartTransitionStartedAt = 0;
-    let restartPausedRoundAt = 0;
-    let restartCoverPresented = false;
-    let restartLayoutPreparing = false;
-    let restartLayoutPrepared = false;
-    let restartRevealAt = 0;
-    let restartFailureMessage = '';
-    let restartFailureReturnAt = 0;
+    let lastHudRenderAt = 0;
+    let lastHudSignature = '';
+    let forceHudRedraw = true;
+    let startBackdropPrepared = false;
+    let sketchFontReady = false;
+    let sketchFontLoadPromise = null;
+    const fittedFontSizeCache = new Map();
+
+    let requestedOrientation = null;
+    let orientationRequestInProgress = false;
+    let fullscreenRequestInProgress = false;
+    let uiNoticeText = '';
+    let uiNoticeVisibleUntil = 0;
+    let cleanHudEnabledAt = 0;
+    let surfaceLayout = {
+      left: 0,
+      top: 0,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      centerX: LOGICAL_WIDTH / 2,
+      centerY: LOGICAL_HEIGHT / 2,
+      quarterTurn: false
+    };
 
     function clamp(value, minimum, maximum) {
       return Math.min(maximum, Math.max(minimum, value));
+    }
+
+    function setSketchFont(context, size, weight = 600) {
+      const safeWeight = clamp(Math.round(weight / 100) * 100, 400, 700);
+      context.font = `${safeWeight} ${size}px ${SKETCH_FONT_FAMILY}`;
+    }
+
+    function setFittedSketchFont(
+      context,
+      text,
+      maximumWidth,
+      preferredSize,
+      minimumSize,
+      weight = 600
+    ) {
+      const safePreferred = Math.max(1, Math.floor(preferredSize));
+      const safeMinimum = clamp(Math.floor(minimumSize), 1, safePreferred);
+      const cacheKey = [
+        sketchFontReady ? 1 : 0,
+        weight,
+        safePreferred,
+        safeMinimum,
+        Math.round(maximumWidth),
+        text
+      ].join('|');
+      let size = fittedFontSizeCache.get(cacheKey);
+
+      if (!Number.isFinite(size)) {
+        size = safePreferred;
+        setSketchFont(context, size, weight);
+
+        while (
+          size > safeMinimum &&
+          context.measureText(text).width > maximumWidth
+        ) {
+          size -= 1;
+          setSketchFont(context, size, weight);
+        }
+
+        fittedFontSizeCache.set(cacheKey, size);
+      } else {
+        setSketchFont(context, size, weight);
+      }
+
+      return size;
+    }
+
+    function updateSketchFontReadiness() {
+      if (!document.fonts || typeof document.fonts.check !== 'function') {
+        return false;
+      }
+
+      const ready = document.fonts.check(
+        '700 40px "PearSketch"',
+        GAME_FONT_TEST_TEXT
+      );
+
+      if (ready !== sketchFontReady) {
+        sketchFontReady = ready;
+        fittedFontSizeCache.clear();
+        forceHudRedraw = true;
+      }
+
+      return ready;
+    }
+
+    function prepareGameFont() {
+      if (!document.fonts || typeof document.fonts.load !== 'function') {
+        return Promise.resolve(false);
+      }
+
+      if (sketchFontLoadPromise) {
+        return sketchFontLoadPromise;
+      }
+
+      const actualLoad = document.fonts
+        .load('700 40px "PearSketch"', GAME_FONT_TEST_TEXT)
+        .then(() => updateSketchFontReadiness())
+        .catch(error => {
+          console.warn(
+            'Шрифт Caveat не загрузился. Используется системный рукописный шрифт.',
+            error
+          );
+          return false;
+        });
+
+      sketchFontLoadPromise = Promise.race([
+        actualLoad,
+        new Promise(resolve => {
+          window.setTimeout(() => resolve(false), GAME_FONT_LOAD_TIMEOUT);
+        })
+      ]).finally(() => {
+        forceHudRedraw = true;
+      });
+
+      // Тайм-аут не отменяет реальную загрузку: поздний Caveat всё равно
+      // активируется и перерисует HUD после завершения запроса.
+      actualLoad.then(() => {
+        forceHudRedraw = true;
+      });
+
+      return sketchFontLoadPromise;
+    }
+
+    function handleFontLoadingDone() {
+      updateSketchFontReadiness();
+    }
+
+    function resetGameClock(realNow = performance.now()) {
+      gameClockStartedAtReal = realNow;
+      gameClockPausedAtReal = 0;
+      gameClockPausedTotal = 0;
+      gameClockPauseReasons.clear();
+    }
+
+    function pauseGameClock(reason, realNow = performance.now()) {
+      if (gameClockPauseReasons.has(reason)) {
+        return;
+      }
+
+      if (gameClockPauseReasons.size === 0) {
+        gameClockPausedAtReal = realNow;
+      }
+
+      gameClockPauseReasons.add(reason);
+    }
+
+    function resumeGameClock(reason, realNow = performance.now()) {
+      if (!gameClockPauseReasons.delete(reason)) {
+        return;
+      }
+
+      if (gameClockPauseReasons.size === 0 && gameClockPausedAtReal > 0) {
+        gameClockPausedTotal += Math.max(0, realNow - gameClockPausedAtReal);
+        gameClockPausedAtReal = 0;
+      }
+    }
+
+    function getGameNow(realNow = performance.now()) {
+      const effectiveRealNow = gameClockPauseReasons.size > 0
+        ? gameClockPausedAtReal
+        : realNow;
+
+      return Math.max(
+        0,
+        effectiveRealNow - gameClockStartedAtReal - gameClockPausedTotal
+      );
+    }
+
+    function loadHintTutorialDone() {
+      try {
+        return window.localStorage.getItem(
+          HINT_TUTORIAL_STORAGE_KEY
+        ) === 'true';
+      } catch {
+        return false;
+      }
+    }
+
+    function saveHintTutorialDone() {
+      try {
+        window.localStorage.setItem(
+          HINT_TUTORIAL_STORAGE_KEY,
+          'true'
+        );
+      } catch {
+        // Обучение останется отключённым до перезагрузки вкладки.
+      }
+    }
+
+    function isHintTutorialVisible(gameNow) {
+      return (
+        !hintTutorialDone &&
+        state === STATE_GAME &&
+        !cleanHudEnabled &&
+        !victoryPending &&
+        Number.isFinite(hintTutorialShowAt) &&
+        gameNow >= hintTutorialShowAt
+      );
+    }
+
+    function dismissHintTutorial() {
+      if (hintTutorialDone) {
+        return;
+      }
+
+      hintTutorialDone = true;
+      hintTutorialShowAt = Infinity;
+      saveHintTutorialDone();
+      forceHudRedraw = true;
+    }
+
+    function mobileOrientationButtonAvailable() {
+      const coarsePointer = typeof window.matchMedia === 'function' &&
+        window.matchMedia('(pointer: coarse)').matches;
+
+      return navigator.maxTouchPoints > 0 || coarsePointer;
+    }
+
+    function viewportOrientation(viewport = getViewportMetrics()) {
+      return viewport.width >= viewport.height ? 'landscape' : 'portrait';
+    }
+
+    function selectedOrientation(viewport = getViewportMetrics()) {
+      return requestedOrientation || viewportOrientation(viewport);
+    }
+
+    function shouldQuarterTurnSurface(viewport) {
+      if (!mobileOrientationButtonAvailable() || requestedOrientation === null) {
+        return false;
+      }
+
+      return viewportOrientation(viewport) !== requestedOrientation;
+    }
+
+    function getFullscreenElement() {
+      return document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        null;
+    }
+
+    function fullscreenSupported() {
+      const root = document.documentElement;
+      const standardSupported =
+        typeof root.requestFullscreen === 'function' &&
+        document.fullscreenEnabled !== false;
+      const webkitSupported =
+        typeof root.webkitRequestFullscreen === 'function';
+
+      return standardSupported || webkitSupported;
+    }
+
+    function isFullscreenActive() {
+      return getFullscreenElement() !== null;
+    }
+
+    function showUiNotice(text, duration = UI_NOTICE_DURATION) {
+      uiNoticeText = String(text || '');
+      uiNoticeVisibleUntil = performance.now() + Math.max(500, duration);
+      forceHudRedraw = true;
+    }
+
+    async function enterFullscreen() {
+      if (isFullscreenActive()) {
+        return true;
+      }
+
+      const root = document.documentElement;
+
+      try {
+        if (
+          typeof root.requestFullscreen === 'function' &&
+          document.fullscreenEnabled !== false
+        ) {
+          await root.requestFullscreen();
+          return true;
+        }
+
+        if (typeof root.webkitRequestFullscreen === 'function') {
+          const result = root.webkitRequestFullscreen();
+
+          if (result && typeof result.then === 'function') {
+            await result;
+          }
+
+          return true;
+        }
+      } catch (error) {
+        console.warn('Не удалось включить полноэкранный режим.', error);
+      }
+
+      return false;
+    }
+
+    async function exitFullscreen() {
+      if (!isFullscreenActive()) {
+        return true;
+      }
+
+      try {
+        if (typeof document.exitFullscreen === 'function') {
+          await document.exitFullscreen();
+          return true;
+        }
+
+        if (typeof document.webkitExitFullscreen === 'function') {
+          const result = document.webkitExitFullscreen();
+
+          if (result && typeof result.then === 'function') {
+            await result;
+          }
+
+          return true;
+        }
+      } catch (error) {
+        console.warn('Не удалось выйти из полноэкранного режима.', error);
+      }
+
+      return false;
+    }
+
+    async function setFullscreenActive(
+      shouldBeActive,
+      { playSound = false, notifyOnFailure = false } = {}
+    ) {
+      if (!fullscreenSupported()) {
+        if (notifyOnFailure) {
+          showUiNotice('Полноэкранный режим недоступен в этом браузере');
+        }
+
+        return false;
+      }
+
+      if (fullscreenRequestInProgress) {
+        return false;
+      }
+
+      if (isFullscreenActive() === shouldBeActive) {
+        return true;
+      }
+
+      fullscreenRequestInProgress = true;
+      forceHudRedraw = true;
+
+      if (playSound) {
+        audioController.playSfx('button');
+      }
+
+      let result = false;
+
+      try {
+        result = shouldBeActive
+          ? await enterFullscreen()
+          : await exitFullscreen();
+
+        if (!result && notifyOnFailure) {
+          showUiNotice(
+            shouldBeActive
+              ? 'Браузер не разрешил открыть полный экран'
+              : 'Не удалось выйти из полного экрана'
+          );
+        }
+      } finally {
+        fullscreenRequestInProgress = false;
+        forceHudRedraw = true;
+        resizeCanvas();
+      }
+
+      return result;
+    }
+
+    function toggleFullscreen() {
+      return setFullscreenActive(!isFullscreenActive(), {
+        playSound: true,
+        notifyOnFailure: true
+      });
     }
 
     function loadBestTime() {
@@ -295,7 +816,7 @@
         );
 
         if (Number.isFinite(stored) && stored >= 0) {
-          return stored;
+          return normalizeTimeToSeconds(stored);
         }
       } catch {
         // Игра продолжает работать без localStorage.
@@ -337,6 +858,7 @@
         this.audioContext = null;
         this.unlocked = false;
         this.pageSuspended = false;
+        this.gamePaused = false;
         this.desiredMusic = 'intro';
         this.transitionToken = 0;
         this.musicTransitionInProgress = false;
@@ -441,6 +963,7 @@
         if (
           this.unlocked &&
           !this.pageSuspended &&
+          !this.gamePaused &&
           !this.musicTransitionInProgress &&
           this.desiredMusic === name
         ) {
@@ -534,7 +1057,7 @@
         this.unlocked = true;
         this.resumeAudioContext();
 
-        if (this.pageSuspended) {
+        if (this.pageSuspended || this.gamePaused) {
           return;
         }
 
@@ -552,15 +1075,29 @@
         }
       }
 
-      setGlobalVolume(value, showHud = true) {
+      setGlobalVolume(
+        value,
+        showHud = true,
+        unmuteOnChange = false
+      ) {
         const wasEffectivelyMuted = this.isEffectivelyMuted;
         const nextVolume = Math.round(clamp(value, 0, 1) * 100) / 100;
+        const volumeChanged = Math.abs(
+          nextVolume - this.globalVolume
+        ) >= 0.001;
+        const muteChanged = Boolean(
+          unmuteOnChange && nextVolume > 0 && this.muted
+        );
 
         if (nextVolume > 0) {
           this.lastAudibleVolume = nextVolume;
         }
 
-        if (Math.abs(nextVolume - this.globalVolume) < 0.001) {
+        if (muteChanged) {
+          this.muted = false;
+        }
+
+        if (!volumeChanged && !muteChanged) {
           if (showHud) {
             showVolumeHud();
           }
@@ -586,7 +1123,11 @@
       }
 
       changeVolume(delta) {
-        this.setGlobalVolume(this.globalVolume + delta, true);
+        this.setGlobalVolume(
+          this.globalVolume + delta,
+          true,
+          true
+        );
       }
 
       toggleMute() {
@@ -685,6 +1226,7 @@
           !audio ||
           !this.unlocked ||
           this.pageSuspended ||
+          this.gamePaused ||
           this.isEffectivelyMuted
         ) {
           return;
@@ -707,7 +1249,7 @@
       }
 
       syncDesiredMusic() {
-        if (!this.unlocked || this.pageSuspended) {
+        if (!this.unlocked || this.pageSuspended || this.gamePaused) {
           return;
         }
 
@@ -730,6 +1272,7 @@
       enterStart() {
         this.transitionToken += 1;
         this.musicTransitionInProgress = false;
+        this.gamePaused = false;
         this.desiredMusic = 'intro';
         this.stopTrack('level');
         this.playTrack('intro');
@@ -737,6 +1280,7 @@
 
       transitionToGame() {
         const token = ++this.transitionToken;
+        this.gamePaused = false;
         this.desiredMusic = 'level';
         this.musicTransitionInProgress = true;
         this.stopTrack('level');
@@ -821,12 +1365,38 @@
       enterEnd(playCompletionSound = true) {
         this.transitionToken += 1;
         this.musicTransitionInProgress = false;
+        this.gamePaused = false;
         this.desiredMusic = null;
         this.stopTrack('intro');
         this.stopTrack('level');
 
         if (playCompletionSound) {
           this.playSfx('complete');
+        }
+      }
+
+      pauseForGameMenu() {
+        if (this.gamePaused) {
+          return;
+        }
+
+        this.gamePaused = true;
+        this.transitionToken += 1;
+        this.musicTransitionInProgress = false;
+        this.pauseTrack('intro');
+        this.pauseTrack('level');
+      }
+
+      resumeFromGameMenu() {
+        if (!this.gamePaused) {
+          return;
+        }
+
+        this.gamePaused = false;
+
+        if (!this.pageSuspended) {
+          this.resumeAudioContext();
+          this.syncDesiredMusic();
         }
       }
 
@@ -1067,33 +1637,47 @@
       };
     }
 
+    function applySurfaceLayout(element, layout) {
+      element.style.width = `${layout.width}px`;
+      element.style.height = `${layout.height}px`;
+      element.style.left = `${layout.left}px`;
+      element.style.top = `${layout.top}px`;
+      element.style.transformOrigin = 'center center';
+      element.style.transform = layout.quarterTurn
+        ? 'rotate(90deg)'
+        : 'none';
+    }
+
     function resizeCanvas() {
       const viewport = getViewportMetrics();
+      const quarterTurn = shouldQuarterTurnSurface(viewport);
+      const availableWidth = quarterTurn ? viewport.height : viewport.width;
+      const availableHeight = quarterTurn ? viewport.width : viewport.height;
       const cssScale = Math.min(
-        viewport.width / LOGICAL_WIDTH,
-        viewport.height / LOGICAL_HEIGHT
+        availableWidth / LOGICAL_WIDTH,
+        availableHeight / LOGICAL_HEIGHT
       );
 
       const displayWidth = LOGICAL_WIDTH * cssScale;
       const displayHeight = LOGICAL_HEIGHT * cssScale;
+      const centerX = viewport.left + viewport.width / 2;
+      const centerY = viewport.top + viewport.height / 2;
+      const displayLeft = centerX - displayWidth / 2;
+      const displayTop = centerY - displayHeight / 2;
 
-      const displayLeft = viewport.left + (viewport.width - displayWidth) / 2;
-      const displayTop = viewport.top + (viewport.height - displayHeight) / 2;
+      surfaceLayout = {
+        left: displayLeft,
+        top: displayTop,
+        width: displayWidth,
+        height: displayHeight,
+        centerX,
+        centerY,
+        quarterTurn
+      };
 
-      canvas.style.width = `${displayWidth}px`;
-      canvas.style.height = `${displayHeight}px`;
-      canvas.style.left = `${displayLeft}px`;
-      canvas.style.top = `${displayTop}px`;
-
-      audioHudCanvas.style.width = `${displayWidth}px`;
-      audioHudCanvas.style.height = `${displayHeight}px`;
-      audioHudCanvas.style.left = `${displayLeft}px`;
-      audioHudCanvas.style.top = `${displayTop}px`;
-
-      startScreen.style.width = `${displayWidth}px`;
-      startScreen.style.height = `${displayHeight}px`;
-      startScreen.style.left = `${displayLeft}px`;
-      startScreen.style.top = `${displayTop}px`;
+      applySurfaceLayout(canvas, surfaceLayout);
+      applySurfaceLayout(audioHudCanvas, surfaceLayout);
+      applySurfaceLayout(startScreen, surfaceLayout);
 
       const devicePixelRatio = Math.max(window.devicePixelRatio || 1, 1);
       const backingScale = Math.min(
@@ -1118,17 +1702,30 @@
       }
 
       configureContexts();
+      forceHudRedraw = true;
     }
 
     function screenToGame(clientX, clientY) {
-      const rect = canvas.getBoundingClientRect();
+      const layout = surfaceLayout;
 
-      if (rect.width <= 0 || rect.height <= 0) {
+      if (layout.width <= 0 || layout.height <= 0) {
         return null;
       }
 
-      const normalizedX = (clientX - rect.left) / rect.width;
-      const normalizedY = (clientY - rect.top) / rect.height;
+      let unrotatedX = clientX;
+      let unrotatedY = clientY;
+
+      if (layout.quarterTurn) {
+        const dx = clientX - layout.centerX;
+        const dy = clientY - layout.centerY;
+
+        // Обратное преобразование для CSS rotate(90deg).
+        unrotatedX = layout.centerX + dy;
+        unrotatedY = layout.centerY - dx;
+      }
+
+      const normalizedX = (unrotatedX - layout.left) / layout.width;
+      const normalizedY = (unrotatedY - layout.top) / layout.height;
 
       if (
         normalizedX < 0 ||
@@ -1473,8 +2070,10 @@
       };
 
       if (
-        rectanglesOverlap(candidateRect, HUD_RECT) ||
-        rectanglesOverlap(candidateRect, GAME_CONTROL_SPAWN_BLOCK_RECT)
+        rectanglesOverlap(candidateRect, HUD_HINT_RECT) ||
+        rectanglesOverlap(candidateRect, GAME_CONTROL_SPAWN_BLOCK_RECT) ||
+        rectanglesOverlap(candidateRect, PAUSE_CONTROL_SPAWN_BLOCK_RECT) ||
+        rectanglesOverlap(candidateRect, HUD_RESTORE_TAB_HIT_RECT)
       ) {
         return false;
       }
@@ -1652,17 +2251,6 @@
       );
     }
 
-    function clearRestartTransition() {
-      restartTransitionStartedAt = 0;
-      restartPausedRoundAt = 0;
-      restartCoverPresented = false;
-      restartLayoutPreparing = false;
-      restartLayoutPrepared = false;
-      restartRevealAt = 0;
-      restartFailureMessage = '';
-      restartFailureReturnAt = 0;
-    }
-
     function resetRunData() {
       pears = [];
       particles = [];
@@ -1682,6 +2270,12 @@
       hintedPearId = null;
       hintEffectUntil = 0;
       usedHintThisRound = false;
+      hintTutorialShowAt = Infinity;
+      pauseExitConfirmUntil = 0;
+      cleanHudEnabled = false;
+      cleanHudEnabledAt = 0;
+      uiNoticeText = '';
+      uiNoticeVisibleUntil = 0;
       pageHiddenAt = 0;
     }
 
@@ -1694,8 +2288,6 @@
     }
 
     function startGame() {
-      clearRestartTransition();
-
       let layout;
 
       try {
@@ -1706,138 +2298,47 @@
         return;
       }
 
+      const realNow = performance.now();
       resetRunData();
+      resetGameClock(realNow);
       pears = layout;
-      timerStartedAt = performance.now();
+      timerStartedAt = getGameNow(realNow);
+      hintTutorialShowAt = hintTutorialDone
+        ? Infinity
+        : timerStartedAt + HINT_TUTORIAL_DELAY_MS;
       state = STATE_GAME;
       syncStartScreenVisibility();
       audioController.playSfx('button');
       audioController.transitionToGame();
+      forceHudRedraw = true;
       focusCanvas();
     }
 
-    function beginRestartRound() {
+    function enterPause(realNow = performance.now()) {
       if (state !== STATE_GAME || victoryPending) {
         return;
       }
 
-      const now = performance.now();
-      restartTransitionStartedAt = now;
-      restartPausedRoundAt = now;
-      restartCoverPresented = false;
-      restartLayoutPreparing = false;
-      restartLayoutPrepared = false;
-      restartRevealAt = 0;
-      restartFailureMessage = '';
-      restartFailureReturnAt = 0;
-      state = STATE_RESTARTING;
-
-      // Старый раунд пока не уничтожается. Если генерация неожиданно завершится
-      // ошибкой, можно безопасно вернуть игрока к прежней раскладке.
+      pauseGameClock('menu', realNow);
+      state = STATE_PAUSE;
+      pauseExitConfirmUntil = 0;
+      volumeGesture = null;
       audioController.playSfx('button');
-      audioController.desiredMusic = 'level';
-      audioController.syncDesiredMusic();
-      focusCanvas();
+      audioController.pauseForGameMenu();
+      forceHudRedraw = true;
     }
 
-    function prepareRestartLayout(now) {
-      if (
-        restartLayoutPreparing ||
-        restartLayoutPrepared ||
-        restartFailureMessage
-      ) {
+    function resumeFromPause(realNow = performance.now()) {
+      if (state !== STATE_PAUSE) {
         return;
       }
 
-      restartLayoutPreparing = true;
-
-      try {
-        // Генерация транзакционная: глобальная раскладка меняется только после
-        // успешного получения всех десяти валидных позиций.
-        const layout = createPearLayout();
-        const transitionStartedAt = restartTransitionStartedAt;
-        const pausedRoundAt = restartPausedRoundAt;
-
-        resetRunData();
-        pears = layout;
-        timerStartedAt = 0;
-
-        restartTransitionStartedAt = transitionStartedAt;
-        restartPausedRoundAt = pausedRoundAt;
-        restartCoverPresented = true;
-        restartLayoutPreparing = false;
-        restartLayoutPrepared = true;
-        restartRevealAt = Math.max(
-          transitionStartedAt + RESTART_MIN_COVER_DURATION,
-          now + RESTART_POST_LAYOUT_HOLD
-        );
-      } catch (error) {
-        console.error('Не удалось обновить раскладку:', error);
-        restartLayoutPreparing = false;
-        restartFailureMessage = 'Не удалось обновить раскладку';
-        restartFailureReturnAt = now + RESTART_FAILURE_HOLD;
-        audioController.playSfx('miss');
-      }
-    }
-
-    function finishRestartTransition(now) {
-      timerStartedAt = now;
       state = STATE_GAME;
-      clearRestartTransition();
-      focusCanvas();
-    }
-
-    function shiftActiveRoundTimestamps(pauseStartedAt, pauseDuration) {
-      if (pauseDuration <= 0) {
-        return;
-      }
-
-      if (timerStartedAt > 0) {
-        timerStartedAt += pauseDuration;
-      }
-
-      if (victoryPending && victoryTransitionAt > pauseStartedAt) {
-        victoryTransitionAt += pauseDuration;
-      }
-
-      if (hintCooldownUntil > pauseStartedAt) {
-        hintCooldownUntil += pauseDuration;
-      }
-
-      if (hintEffectUntil > pauseStartedAt) {
-        hintEffectUntil += pauseDuration;
-      }
-
-      for (const pear of pears) {
-        if (pear.foundAt > 0 && pear.foundAt + POP_DURATION > pauseStartedAt) {
-          pear.foundAt += pauseDuration;
-        }
-      }
-
-      for (const burst of bursts) {
-        if (burst.createdAt + burst.duration > pauseStartedAt) {
-          burst.createdAt += pauseDuration;
-        }
-      }
-
-      for (const particle of particles) {
-        if (particle.createdAt + particle.duration > pauseStartedAt) {
-          particle.createdAt += pauseDuration;
-        }
-      }
-
-      for (const penaltyText of penaltyTexts) {
-        if (penaltyText.createdAt + penaltyText.duration > pauseStartedAt) {
-          penaltyText.createdAt += pauseDuration;
-        }
-      }
-    }
-
-    function abortRestartTransition(now) {
-      const pauseDuration = Math.max(0, now - restartPausedRoundAt);
-      shiftActiveRoundTimestamps(restartPausedRoundAt, pauseDuration);
-      state = STATE_GAME;
-      clearRestartTransition();
+      pauseExitConfirmUntil = 0;
+      resumeGameClock('menu', realNow);
+      audioController.playSfx('button');
+      audioController.resumeFromGameMenu();
+      forceHudRedraw = true;
       focusCanvas();
     }
 
@@ -1850,9 +2351,11 @@
         finalElapsed = 0;
         isNewRecord = false;
       } else {
-        finalElapsed = Math.max(
-          0,
-          now - timerStartedAt + penaltyMilliseconds
+        finalElapsed = normalizeTimeToSeconds(
+          Math.max(
+            0,
+            now - timerStartedAt + penaltyMilliseconds
+          )
         );
         isNewRecord = bestTime === null || finalElapsed < bestTime;
 
@@ -1866,38 +2369,41 @@
       victoryTransitionAt = now + VICTORY_DELAY;
     }
 
-    function completeVictoryTransition() {
-      const now = performance.now();
-
-      clearRestartTransition();
+    function completeVictoryTransition(realNow = performance.now()) {
       pears = [];
       particles = [];
       bursts = [];
       victoryPending = false;
       victoryTransitionAt = 0;
       state = STATE_END;
-      initializeVictoryCelebration(now);
+      initializeVictoryCelebration(realNow);
       syncStartScreenVisibility();
     }
 
     function returnToStart() {
-      clearRestartTransition();
+      const realNow = performance.now();
       resetRunData();
+      resetGameClock(realNow);
       state = STATE_START;
       syncStartScreenVisibility();
       audioController.enterStart();
+      forceHudRedraw = true;
+    }
+
+    function normalizeTimeToSeconds(milliseconds) {
+      const safeMilliseconds = Math.max(0, Number(milliseconds) || 0);
+      return Math.floor(safeMilliseconds / RECORD_RESOLUTION_MS) *
+        RECORD_RESOLUTION_MS;
     }
 
     function formatTime(milliseconds) {
-      const total = Math.max(0, Math.floor(milliseconds));
-      const minutes = Math.floor(total / 60000);
-      const seconds = Math.floor((total % 60000) / 1000);
-      const millis = total % 1000;
+      const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
 
       return (
         `${String(minutes).padStart(2, '0')}:` +
-        `${String(seconds).padStart(2, '0')}.` +
-        `${String(millis).padStart(3, '0')}`
+        `${String(seconds).padStart(2, '0')}`
       );
     }
 
@@ -2143,19 +2649,24 @@
     }
 
     function drawGameHud(now) {
+      if (cleanHudEnabled) {
+        return;
+      }
+
       const timeText = usedHintThisRound
         ? 'Режим без таймера'
         : formatTime(getCurrentElapsed(now));
       const foundText = `${getFoundCount()} / ${PEAR_COUNT}`;
-      const centerY = HUD_RECT.y + HUD_RECT.height / 2;
+      const hudRect = usedHintThisRound ? HUD_HINT_RECT : HUD_RECT;
+      const centerY = hudRect.y + hudRect.height / 2;
 
       ctx.save();
       drawRoundedRect(
         ctx,
-        HUD_RECT.x,
-        HUD_RECT.y,
-        HUD_RECT.width,
-        HUD_RECT.height,
+        hudRect.x,
+        hudRect.y,
+        hudRect.width,
+        hudRect.height,
         24
       );
       ctx.fillStyle = 'rgba(20, 28, 24, 0.44)';
@@ -2174,7 +2685,7 @@
       );
       const iconWidth = sourceWidth * iconScale;
       const iconHeight = sourceHeight * iconScale;
-      const iconCenterX = HUD_RECT.x + 40;
+      const iconCenterX = hudRect.x + 40;
 
       ctx.drawImage(
         images.pearColor,
@@ -2187,17 +2698,17 @@
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
       ctx.textAlign = 'left';
-      ctx.font = '800 34px Arial, Helvetica, sans-serif';
+      setSketchFont(ctx, 40, 700);
       ctx.lineWidth = 6;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
-      ctx.strokeText(foundText, HUD_RECT.x + 72, centerY + 1);
+      ctx.strokeText(foundText, hudRect.x + 72, centerY + 1);
       ctx.fillStyle = '#fff5a7';
-      ctx.fillText(foundText, HUD_RECT.x + 72, centerY + 1);
+      ctx.fillText(foundText, hudRect.x + 72, centerY + 1);
 
       if (usedHintThisRound) {
-        const badgeWidth = 300;
+        const badgeWidth = 276;
         const badgeHeight = 54;
-        const badgeX = HUD_RECT.x + HUD_RECT.width - badgeWidth - 12;
+        const badgeX = hudRect.x + hudRect.width - badgeWidth - 12;
         const badgeY = centerY - badgeHeight / 2;
 
         drawRoundedRect(
@@ -2214,7 +2725,14 @@
         ctx.strokeStyle = 'rgba(86, 61, 18, 0.72)';
         ctx.stroke();
         ctx.textAlign = 'center';
-        ctx.font = '800 27px Arial, Helvetica, sans-serif';
+        setFittedSketchFont(
+          ctx,
+          timeText,
+          badgeWidth - 24,
+          31,
+          23,
+          700
+        );
         ctx.lineWidth = 0;
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#35270e';
@@ -2225,12 +2743,12 @@
         );
       } else {
         ctx.textAlign = 'right';
-        ctx.font = '800 36px Arial, Helvetica, sans-serif';
+        setSketchFont(ctx, 43, 700);
         ctx.lineWidth = 7;
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.strokeText(
           timeText,
-          HUD_RECT.x + HUD_RECT.width - 18,
+          hudRect.x + hudRect.width - 18,
           centerY + 1
         );
         ctx.shadowColor = 'rgba(238, 255, 92, 0.78)';
@@ -2238,7 +2756,7 @@
         ctx.fillStyle = '#f1ff58';
         ctx.fillText(
           timeText,
-          HUD_RECT.x + HUD_RECT.width - 18,
+          hudRect.x + hudRect.width - 18,
           centerY + 1
         );
       }
@@ -2276,7 +2794,7 @@
       ctx.globalAlpha = alpha;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = '900 42px Arial, Helvetica, sans-serif';
+      setSketchFont(ctx, 49, 700);
       ctx.lineWidth = 9;
       ctx.lineJoin = 'round';
       ctx.strokeStyle = 'rgba(55, 0, 0, 0.88)';
@@ -2592,6 +3110,38 @@
       ctx.restore();
     }
 
+    function drawFourPointSparkle(
+      context,
+      centerX,
+      centerY,
+      radius,
+      rotation = 0
+    ) {
+      context.save();
+      context.translate(centerX, centerY);
+      context.rotate(rotation);
+      context.beginPath();
+
+      for (let index = 0; index < 8; index += 1) {
+        const angle = index * Math.PI / 4;
+        const pointRadius = index % 2 === 0
+          ? radius
+          : radius * 0.28;
+        const x = Math.cos(angle) * pointRadius;
+        const y = Math.sin(angle) * pointRadius;
+
+        if (index === 0) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      }
+
+      context.closePath();
+      context.fill();
+      context.restore();
+    }
+
     function drawVictoryMessage(now) {
       const elapsed = Math.max(0, now - celebrationStartedAt);
       const appearProgress = clamp(elapsed / 520, 0, 1);
@@ -2616,7 +3166,7 @@
         panelHeight,
         54
       );
-      ctx.fillStyle = 'rgba(25, 13, 29, 0.68)';
+      ctx.fillStyle = 'rgba(25, 13, 29, 0.58)';
       ctx.fill();
       ctx.lineWidth = 4;
       ctx.strokeStyle = 'rgba(255, 225, 117, 0.82)';
@@ -2648,16 +3198,40 @@
         ctx.lineWidth = 4;
         ctx.strokeStyle = '#ffe889';
         ctx.stroke();
-        ctx.font = '900 42px Arial, Helvetica, sans-serif';
+        const recordText = 'НОВЫЙ РЕКОРД!';
+        setFittedSketchFont(
+          ctx,
+          recordText,
+          badgeWidth - 170,
+          49,
+          38,
+          700
+        );
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#fff4a8';
         ctx.shadowColor = 'rgba(255, 214, 72, 0.75)';
         ctx.shadowBlur = 16;
         ctx.fillText(
-          '🎉 НОВЫЙ РЕКОРД!',
+          recordText,
           LOGICAL_WIDTH / 2,
           badgeY + badgeHeight / 2 + 1
+        );
+
+        ctx.fillStyle = '#ffe889';
+        drawFourPointSparkle(
+          ctx,
+          badgeX + 58,
+          badgeY + badgeHeight / 2,
+          22,
+          Math.PI / 4
+        );
+        drawFourPointSparkle(
+          ctx,
+          badgeX + badgeWidth - 58,
+          badgeY + badgeHeight / 2,
+          22,
+          Math.PI / 4
         );
         ctx.restore();
       }
@@ -2666,7 +3240,14 @@
       ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
 
-      ctx.font = '900 82px Arial, Helvetica, sans-serif';
+      setFittedSketchFont(
+        ctx,
+        'УРОВЕНЬ ПРОЙДЕН!',
+        panelWidth - 100,
+        91,
+        62,
+        700
+      );
       ctx.lineWidth = 14;
       ctx.strokeStyle = 'rgba(62, 29, 44, 0.96)';
       ctx.strokeText(
@@ -2682,36 +3263,60 @@
       );
 
       ctx.shadowBlur = 0;
-      ctx.font = '700 36px Arial, Helvetica, sans-serif';
+      const victorySubtitle = 'Все 10 груш найдены — вы молодец!';
+      setFittedSketchFont(
+        ctx,
+        victorySubtitle,
+        panelWidth - 120,
+        43,
+        31,
+        700
+      );
       ctx.fillStyle = '#fff9df';
       ctx.fillText(
-        'Все 10 груш найдены — вы молодец!',
+        victorySubtitle,
         LOGICAL_WIDTH / 2,
         panelY + 190
       );
 
       if (usedHintThisRound) {
-        ctx.font = '800 40px Arial, Helvetica, sans-serif';
+        const hintedCompletionText = 'Уровень пройден (с подсказкой)';
+        setFittedSketchFont(
+          ctx,
+          hintedCompletionText,
+          panelWidth - 130,
+          47,
+          34,
+          700
+        );
         ctx.fillStyle = '#f1ff58';
         ctx.shadowColor = 'rgba(238, 255, 92, 0.5)';
         ctx.shadowBlur = 10;
         ctx.fillText(
-          'Уровень пройден (с подсказкой)',
+          hintedCompletionText,
           LOGICAL_WIDTH / 2,
           panelY + 292
         );
 
         ctx.shadowBlur = 0;
-        ctx.font = '700 31px Arial, Helvetica, sans-serif';
+        const recordDisabledText = 'Таймер отключён — рекорд не обновлён';
+        setFittedSketchFont(
+          ctx,
+          recordDisabledText,
+          panelWidth - 140,
+          37,
+          28,
+          700
+        );
         ctx.fillStyle = '#fff6c9';
         ctx.fillText(
-          'Таймер отключён — рекорд не обновлён',
+          recordDisabledText,
           LOGICAL_WIDTH / 2,
           panelY + 355
         );
 
         if (bestTime !== null) {
-          ctx.font = '600 28px Arial, Helvetica, sans-serif';
+          setSketchFont(ctx, 34, 600);
           ctx.fillStyle = 'rgba(255, 249, 223, 0.82)';
           ctx.fillText(
             `Сохранённый рекорд: ${formatTime(bestTime)}`,
@@ -2720,7 +3325,7 @@
           );
         }
       } else {
-        ctx.font = '800 40px Arial, Helvetica, sans-serif';
+        setSketchFont(ctx, 47, 700);
         ctx.fillStyle = '#f1ff58';
         ctx.shadowColor = 'rgba(238, 255, 92, 0.55)';
         ctx.shadowBlur = 12;
@@ -2731,7 +3336,7 @@
         );
 
         ctx.shadowBlur = 0;
-        ctx.font = '700 35px Arial, Helvetica, sans-serif';
+        setSketchFont(ctx, 42, 700);
         ctx.fillStyle = '#fff6c9';
         ctx.fillText(
           `Лучшее время: ${formatTime(bestTime ?? finalElapsed)}`,
@@ -2740,10 +3345,18 @@
         );
       }
 
-      ctx.font = '600 29px Arial, Helvetica, sans-serif';
+      const returnPrompt = 'Нажмите на экран, чтобы вернуться на старт';
+      setFittedSketchFont(
+        ctx,
+        returnPrompt,
+        panelWidth - 150,
+        35,
+        27,
+        600
+      );
       ctx.fillStyle = 'rgba(255, 255, 255, 0.84)';
       ctx.fillText(
-        'Нажмите на экран, чтобы вернуться на старт',
+        returnPrompt,
         LOGICAL_WIDTH / 2,
         panelY + 478
       );
@@ -2759,6 +3372,7 @@
 
     function showVolumeHud() {
       volumeHudVisibleUntil = performance.now() + VOLUME_HUD_DURATION;
+      forceHudRedraw = true;
     }
 
     function drawRoundedRect(context, x, y, width, height, radius) {
@@ -2779,61 +3393,113 @@
       context.closePath();
     }
 
+    function drawSketchButtonFrame(
+      context,
+      rect,
+      fillStyle,
+      strokeStyle,
+      radius = 26
+    ) {
+      context.save();
+
+      drawRoundedRect(
+        context,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        radius
+      );
+      context.fillStyle = fillStyle;
+      context.fill();
+      context.lineWidth = 3.6;
+      context.strokeStyle = strokeStyle;
+      context.stroke();
+
+      context.globalAlpha = 0.3;
+      drawRoundedRect(
+        context,
+        rect.x + 2,
+        rect.y - 1,
+        rect.width - 3,
+        rect.height + 1,
+        Math.max(4, radius - 2)
+      );
+      context.lineWidth = 1.8;
+      context.strokeStyle = strokeStyle;
+      context.stroke();
+      context.restore();
+    }
+
     function drawSpeakerIcon(context, centerX, centerY, size, muted) {
       const half = size / 2;
       const left = centerX - half;
       const top = centerY - half;
 
-      context.save();
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      context.strokeStyle = '#fff6b3';
-      context.fillStyle = '#fff6b3';
-      context.lineWidth = Math.max(4, size * 0.075);
-      context.shadowColor = 'rgba(255, 214, 72, 0.65)';
-      context.shadowBlur = 10;
-
-      context.beginPath();
-      context.rect(left + size * 0.12, top + size * 0.36, size * 0.2, size * 0.28);
-      context.fill();
-
-      context.beginPath();
-      context.moveTo(left + size * 0.31, top + size * 0.36);
-      context.lineTo(left + size * 0.58, top + size * 0.16);
-      context.lineTo(left + size * 0.58, top + size * 0.84);
-      context.lineTo(left + size * 0.31, top + size * 0.64);
-      context.closePath();
-      context.fill();
-
-      if (muted) {
+      function traceSpeakerBody(offsetX = 0, offsetY = 0) {
         context.beginPath();
-        context.moveTo(left + size * 0.68, top + size * 0.34);
-        context.lineTo(left + size * 0.9, top + size * 0.66);
-        context.moveTo(left + size * 0.9, top + size * 0.34);
-        context.lineTo(left + size * 0.68, top + size * 0.66);
-        context.stroke();
-      } else {
+        context.moveTo(left + size * 0.12 + offsetX, top + size * 0.36 + offsetY);
+        context.lineTo(left + size * 0.31 + offsetX, top + size * 0.36 + offsetY);
+        context.lineTo(left + size * 0.58 + offsetX, top + size * 0.16 + offsetY);
+        context.lineTo(left + size * 0.58 + offsetX, top + size * 0.84 + offsetY);
+        context.lineTo(left + size * 0.31 + offsetX, top + size * 0.64 + offsetY);
+        context.lineTo(left + size * 0.12 + offsetX, top + size * 0.64 + offsetY);
+        context.closePath();
+      }
+
+      function traceSoundMarks(offsetX = 0, offsetY = 0) {
+        if (muted) {
+          context.beginPath();
+          context.moveTo(left + size * 0.68 + offsetX, top + size * 0.34 + offsetY);
+          context.lineTo(left + size * 0.9 + offsetX, top + size * 0.66 + offsetY);
+          context.moveTo(left + size * 0.9 + offsetX, top + size * 0.34 + offsetY);
+          context.lineTo(left + size * 0.68 + offsetX, top + size * 0.66 + offsetY);
+          return;
+        }
+
         context.beginPath();
         context.arc(
-          left + size * 0.57,
-          centerY,
+          left + size * 0.57 + offsetX,
+          centerY + offsetY,
           size * 0.2,
           -Math.PI / 3,
           Math.PI / 3
         );
-        context.stroke();
-
-        context.beginPath();
+        context.moveTo(
+          left + size * 0.57 + Math.cos(-Math.PI / 3) * size * 0.34 + offsetX,
+          centerY + Math.sin(-Math.PI / 3) * size * 0.34 + offsetY
+        );
         context.arc(
-          left + size * 0.57,
-          centerY,
+          left + size * 0.57 + offsetX,
+          centerY + offsetY,
           size * 0.34,
           -Math.PI / 3,
           Math.PI / 3
         );
-        context.stroke();
       }
 
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.shadowColor = 'rgba(255, 214, 72, 0.65)';
+      context.shadowBlur = 10;
+      context.fillStyle = '#fff6b3';
+      traceSpeakerBody();
+      context.fill();
+
+      context.strokeStyle = '#fff6b3';
+      context.lineWidth = Math.max(4, size * 0.075);
+      traceSoundMarks();
+      context.stroke();
+
+      context.shadowBlur = 0;
+      context.globalAlpha = 0.34;
+      context.strokeStyle = '#5e4128';
+      context.lineWidth = Math.max(2, size * 0.032);
+      traceSpeakerBody(1.5, -1);
+      context.stroke();
+      traceSoundMarks(1.5, -1);
+      context.stroke();
       context.restore();
     }
 
@@ -2845,21 +3511,12 @@
       const rect = MUTE_BUTTON_RECT;
       const muted = audioController.isEffectivelyMuted;
 
-      hudCtx.save();
-      drawRoundedRect(
+      drawSketchButtonFrame(
         hudCtx,
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        26
+        rect,
+        'rgba(39, 32, 25, 0.64)',
+        'rgba(255, 237, 168, 0.78)'
       );
-      hudCtx.fillStyle = 'rgba(18, 23, 21, 0.68)';
-      hudCtx.fill();
-      hudCtx.lineWidth = 3;
-      hudCtx.strokeStyle = 'rgba(255, 245, 166, 0.72)';
-      hudCtx.stroke();
-      hudCtx.restore();
 
       drawSpeakerIcon(
         hudCtx,
@@ -2868,6 +3525,250 @@
         70,
         muted
       );
+    }
+
+    function drawOrientationIcon(context, centerX, centerY, landscape) {
+      const deviceWidth = landscape ? 64 : 42;
+      const deviceHeight = landscape ? 42 : 64;
+      const left = centerX - deviceWidth / 2;
+      const top = centerY - deviceHeight / 2;
+      const arrowStart = Math.PI * 0.12;
+      const arrowEnd = Math.PI * 0.58;
+      const arrowRadius = 47;
+
+      function drawDevice(offsetX = 0, offsetY = 0) {
+        drawRoundedRect(
+          context,
+          left + offsetX,
+          top + offsetY,
+          deviceWidth,
+          deviceHeight,
+          9
+        );
+      }
+
+      function drawArrow(offsetX = 0, offsetY = 0) {
+        context.beginPath();
+        context.arc(
+          centerX + offsetX,
+          centerY + offsetY,
+          arrowRadius,
+          arrowStart,
+          arrowEnd
+        );
+        context.stroke();
+
+        const arrowX = centerX + Math.cos(arrowEnd) * arrowRadius + offsetX;
+        const arrowY = centerY + Math.sin(arrowEnd) * arrowRadius + offsetY;
+        context.beginPath();
+        context.moveTo(arrowX, arrowY);
+        context.lineTo(arrowX - 12, arrowY - 3);
+        context.lineTo(arrowX - 4, arrowY - 13);
+        context.closePath();
+        context.fillStyle = context.strokeStyle;
+        context.fill();
+      }
+
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = orientationRequestInProgress
+        ? 'rgba(255, 246, 179, 0.55)'
+        : '#fff6b3';
+      context.fillStyle = 'rgba(255, 246, 179, 0.16)';
+      context.lineWidth = 5;
+      context.shadowColor = 'rgba(255, 214, 72, 0.58)';
+      context.shadowBlur = orientationRequestInProgress ? 4 : 10;
+      drawDevice();
+      context.fill();
+      context.stroke();
+      drawArrow();
+
+      context.globalAlpha = 0.28;
+      context.shadowBlur = 0;
+      context.strokeStyle = '#5e4128';
+      context.lineWidth = 2.2;
+      drawDevice(1.5, -1);
+      context.stroke();
+      drawArrow(1.5, -1);
+      context.restore();
+    }
+
+    function drawOrientationButton() {
+      if (state !== STATE_START || !mobileOrientationButtonAvailable()) {
+        return;
+      }
+
+      const rect = ORIENTATION_BUTTON_RECT;
+      const landscape = selectedOrientation() === 'landscape';
+
+      drawSketchButtonFrame(
+        hudCtx,
+        rect,
+        orientationRequestInProgress
+          ? 'rgba(39, 32, 25, 0.45)'
+          : 'rgba(39, 32, 25, 0.64)',
+        orientationRequestInProgress
+          ? 'rgba(255, 237, 168, 0.42)'
+          : 'rgba(255, 237, 168, 0.78)'
+      );
+
+      drawOrientationIcon(
+        hudCtx,
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+        landscape
+      );
+    }
+
+    function getStartFullscreenButtonRect() {
+      return mobileOrientationButtonAvailable()
+        ? FULLSCREEN_BUTTON_RECT
+        : ORIENTATION_BUTTON_RECT;
+    }
+
+    function getStartFullscreenButtonHitRect() {
+      return mobileOrientationButtonAvailable()
+        ? FULLSCREEN_BUTTON_HIT_RECT
+        : ORIENTATION_BUTTON_HIT_RECT;
+    }
+
+    function drawFullscreenIcon(
+      context,
+      centerX,
+      centerY,
+      size,
+      active,
+      disabled = false
+    ) {
+      const half = size * 0.38;
+      const segment = size * 0.24;
+      const direction = active ? -1 : 1;
+      const color = disabled ? '#8a887b' : '#fff6b3';
+
+      function traceCorners(offsetX = 0, offsetY = 0) {
+        const left = centerX - half + offsetX;
+        const right = centerX + half + offsetX;
+        const top = centerY - half + offsetY;
+        const bottom = centerY + half + offsetY;
+        const inset = active ? segment * 0.42 : 0;
+
+        context.beginPath();
+        context.moveTo(left + segment * direction + inset, top + inset);
+        context.lineTo(left + inset, top + inset);
+        context.lineTo(left + inset, top + segment * direction + inset);
+
+        context.moveTo(right - segment * direction - inset, top + inset);
+        context.lineTo(right - inset, top + inset);
+        context.lineTo(right - inset, top + segment * direction + inset);
+
+        context.moveTo(left + segment * direction + inset, bottom - inset);
+        context.lineTo(left + inset, bottom - inset);
+        context.lineTo(left + inset, bottom - segment * direction - inset);
+
+        context.moveTo(right - segment * direction - inset, bottom - inset);
+        context.lineTo(right - inset, bottom - inset);
+        context.lineTo(right - inset, bottom - segment * direction - inset);
+      }
+
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = color;
+      context.lineWidth = 6;
+      context.shadowColor = disabled
+        ? 'transparent'
+        : 'rgba(255, 214, 72, 0.58)';
+      context.shadowBlur = disabled ? 0 : 10;
+      traceCorners();
+      context.stroke();
+
+      context.globalAlpha = 0.3;
+      context.shadowBlur = 0;
+      context.strokeStyle = '#5e4128';
+      context.lineWidth = 2.4;
+      traceCorners(1.5, -1);
+      context.stroke();
+      context.restore();
+    }
+
+    function drawFullscreenButton() {
+      if (state !== STATE_START || !fullscreenSupported()) {
+        return;
+      }
+
+      const rect = getStartFullscreenButtonRect();
+
+      drawSketchButtonFrame(
+        hudCtx,
+        rect,
+        fullscreenRequestInProgress
+          ? 'rgba(39, 32, 25, 0.45)'
+          : 'rgba(39, 32, 25, 0.64)',
+        fullscreenRequestInProgress
+          ? 'rgba(190, 184, 157, 0.42)'
+          : 'rgba(255, 237, 168, 0.78)'
+      );
+
+      drawFullscreenIcon(
+        hudCtx,
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+        72,
+        isFullscreenActive(),
+        fullscreenRequestInProgress
+      );
+    }
+
+    function drawHudRestoreTab(now) {
+      const rect = HUD_RESTORE_TAB_RECT;
+      const centerX = rect.x + rect.width / 2 - 2;
+      const centerY = rect.y + rect.height / 2;
+      const elapsed = Math.max(0, now - cleanHudEnabledAt);
+      const emphasis = clamp(
+        1 - elapsed / HUD_RESTORE_EMPHASIS_DURATION,
+        0,
+        1
+      );
+
+      hudCtx.save();
+      hudCtx.globalAlpha = 0.58 + emphasis * 0.32;
+      drawRoundedRect(
+        hudCtx,
+        rect.x,
+        rect.y,
+        rect.width + 20,
+        rect.height,
+        24
+      );
+      hudCtx.fillStyle = 'rgba(40, 32, 25, 0.34)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = 'rgba(255, 237, 168, 0.56)';
+      hudCtx.stroke();
+
+      hudCtx.strokeStyle = '#fff6b3';
+      hudCtx.lineWidth = 5.5;
+      hudCtx.lineCap = 'round';
+      hudCtx.lineJoin = 'round';
+      hudCtx.shadowColor = 'rgba(255, 214, 72, 0.45)';
+      hudCtx.shadowBlur = 5 + emphasis * 9;
+      hudCtx.beginPath();
+      hudCtx.ellipse(centerX, centerY, 22, 14, 0, 0, Math.PI * 2);
+      hudCtx.stroke();
+      hudCtx.beginPath();
+      hudCtx.arc(centerX, centerY, 6, 0, Math.PI * 2);
+      hudCtx.fillStyle = '#fff6b3';
+      hudCtx.fill();
+
+      hudCtx.globalAlpha = 0.28;
+      hudCtx.shadowBlur = 0;
+      hudCtx.strokeStyle = '#5e4128';
+      hudCtx.lineWidth = 2.2;
+      hudCtx.beginPath();
+      hudCtx.ellipse(centerX + 1.5, centerY - 1, 22, 14, 0, 0, Math.PI * 2);
+      hudCtx.stroke();
+      hudCtx.restore();
     }
 
     function drawVolumePopup(now) {
@@ -2880,7 +3781,9 @@
         ? remaining / VOLUME_HUD_FADE_DURATION
         : 1;
       const percent = Math.round(audioController.globalVolume * 100);
-      const text = `Громкость: ${percent}%`;
+      const text = audioController.isEffectivelyMuted
+        ? 'Звук выключен'
+        : `Громкость: ${percent}%`;
       const width = 520;
       const height = 84;
       const x = (LOGICAL_WIDTH - width) / 2;
@@ -2889,13 +3792,20 @@
       hudCtx.save();
       hudCtx.globalAlpha = clamp(alpha, 0, 1);
       drawRoundedRect(hudCtx, x, y, width, height, 28);
-      hudCtx.fillStyle = 'rgba(16, 22, 19, 0.82)';
+      hudCtx.fillStyle = 'rgba(47, 38, 29, 0.76)';
       hudCtx.fill();
       hudCtx.lineWidth = 3;
       hudCtx.strokeStyle = 'rgba(255, 235, 112, 0.8)';
       hudCtx.stroke();
 
-      hudCtx.font = '700 34px Arial, Helvetica, sans-serif';
+      setFittedSketchFont(
+        hudCtx,
+        text,
+        width - 150,
+        41,
+        30,
+        700
+      );
       hudCtx.textAlign = 'left';
       hudCtx.textBaseline = 'middle';
       hudCtx.fillStyle = '#fff4a8';
@@ -2916,31 +3826,87 @@
       hudCtx.restore();
     }
 
+    function drawUiNotice(now) {
+      if (!uiNoticeText || now >= uiNoticeVisibleUntil) {
+        return;
+      }
+
+      const remaining = uiNoticeVisibleUntil - now;
+      const alpha = remaining < UI_NOTICE_FADE_DURATION
+        ? remaining / UI_NOTICE_FADE_DURATION
+        : 1;
+      const width = 760;
+      const height = 78;
+      const x = (LOGICAL_WIDTH - width) / 2;
+      const y = LOGICAL_HEIGHT - height - 34;
+
+      hudCtx.save();
+      hudCtx.globalAlpha = clamp(alpha, 0, 1);
+      drawRoundedRect(hudCtx, x, y, width, height, 26);
+      hudCtx.fillStyle = 'rgba(47, 38, 29, 0.78)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = 'rgba(255, 235, 112, 0.76)';
+      hudCtx.stroke();
+      setFittedSketchFont(
+        hudCtx,
+        uiNoticeText,
+        width - 54,
+        39,
+        27,
+        700
+      );
+      hudCtx.textAlign = 'center';
+      hudCtx.textBaseline = 'middle';
+      hudCtx.lineWidth = 6;
+      hudCtx.strokeStyle = 'rgba(0, 0, 0, 0.68)';
+      hudCtx.strokeText(
+        uiNoticeText,
+        LOGICAL_WIDTH / 2,
+        y + height / 2 + 1
+      );
+      hudCtx.fillStyle = '#fff6b3';
+      hudCtx.fillText(
+        uiNoticeText,
+        LOGICAL_WIDTH / 2,
+        y + height / 2 + 1
+      );
+      hudCtx.restore();
+    }
+
     function drawStartBestTime() {
       if (state !== STATE_START || bestTime === null || !assetsReady) {
         return;
       }
 
-      const width = 470;
+      const width = 390;
       const height = 72;
       const x = LOGICAL_WIDTH - width - 30;
       const y = 28;
 
       hudCtx.save();
       drawRoundedRect(hudCtx, x, y, width, height, 26);
-      hudCtx.fillStyle = 'rgba(16, 22, 19, 0.76)';
+      hudCtx.fillStyle = 'rgba(47, 38, 29, 0.7)';
       hudCtx.fill();
       hudCtx.lineWidth = 3;
       hudCtx.strokeStyle = 'rgba(255, 235, 112, 0.76)';
       hudCtx.stroke();
-      hudCtx.font = '800 34px Arial, Helvetica, sans-serif';
+      const recordLabel = `Рекорд: ${formatTime(bestTime)}`;
+      setFittedSketchFont(
+        hudCtx,
+        recordLabel,
+        width - 38,
+        40,
+        29,
+        700
+      );
       hudCtx.textAlign = 'center';
       hudCtx.textBaseline = 'middle';
       hudCtx.fillStyle = '#fff4a8';
       hudCtx.shadowColor = 'rgba(255, 214, 72, 0.55)';
       hudCtx.shadowBlur = 9;
       hudCtx.fillText(
-        `Рекорд: ${formatTime(bestTime)}`,
+        recordLabel,
         x + width / 2,
         y + height / 2 + 1
       );
@@ -2948,37 +3914,373 @@
     }
 
     function drawBulbIcon(context, centerX, centerY, size, disabled) {
+      function traceBulb(offsetX = 0, offsetY = 0) {
+        context.beginPath();
+        context.arc(
+          centerX + offsetX,
+          centerY - size * 0.1 + offsetY,
+          size * 0.27,
+          Math.PI * 0.15,
+          Math.PI * 0.85,
+          true
+        );
+        context.quadraticCurveTo(
+          centerX - size * 0.23 + offsetX,
+          centerY + size * 0.16 + offsetY,
+          centerX - size * 0.12 + offsetX,
+          centerY + size * 0.27 + offsetY
+        );
+        context.lineTo(
+          centerX + size * 0.12 + offsetX,
+          centerY + size * 0.27 + offsetY
+        );
+        context.quadraticCurveTo(
+          centerX + size * 0.23 + offsetX,
+          centerY + size * 0.16 + offsetY,
+          centerX + size * 0.27 + offsetX,
+          centerY - size * 0.1 + offsetY
+        );
+        context.closePath();
+      }
+
+      function traceBulbBase(offsetX = 0, offsetY = 0) {
+        context.beginPath();
+        context.moveTo(
+          centerX - size * 0.13 + offsetX,
+          centerY + size * 0.36 + offsetY
+        );
+        context.lineTo(
+          centerX + size * 0.13 + offsetX,
+          centerY + size * 0.36 + offsetY
+        );
+        context.moveTo(
+          centerX - size * 0.09 + offsetX,
+          centerY + size * 0.46 + offsetY
+        );
+        context.lineTo(
+          centerX + size * 0.09 + offsetX,
+          centerY + size * 0.46 + offsetY
+        );
+      }
+
       context.save();
       context.lineCap = 'round';
       context.lineJoin = 'round';
-      context.strokeStyle = disabled ? '#9d9d86' : '#fff36c';
       context.fillStyle = disabled ? '#777768' : '#fff36c';
+      context.strokeStyle = disabled ? '#9d9d86' : '#fff36c';
       context.lineWidth = Math.max(4, size * 0.08);
       context.shadowColor = disabled ? 'transparent' : '#fff36c';
       context.shadowBlur = disabled ? 0 : 14;
-      context.beginPath();
-      context.arc(centerX, centerY - size * 0.1, size * 0.27, Math.PI * 0.15, Math.PI * 0.85, true);
-      context.quadraticCurveTo(
-        centerX - size * 0.23,
-        centerY + size * 0.16,
-        centerX - size * 0.12,
-        centerY + size * 0.27
-      );
-      context.lineTo(centerX + size * 0.12, centerY + size * 0.27);
-      context.quadraticCurveTo(
-        centerX + size * 0.23,
-        centerY + size * 0.16,
-        centerX + size * 0.27,
-        centerY - size * 0.1
-      );
+      traceBulb();
       context.fill();
-      context.beginPath();
-      context.moveTo(centerX - size * 0.13, centerY + size * 0.36);
-      context.lineTo(centerX + size * 0.13, centerY + size * 0.36);
-      context.moveTo(centerX - size * 0.09, centerY + size * 0.46);
-      context.lineTo(centerX + size * 0.09, centerY + size * 0.46);
+      traceBulbBase();
+      context.stroke();
+
+      context.globalAlpha = 0.3;
+      context.shadowBlur = 0;
+      context.strokeStyle = disabled ? '#646057' : '#5e4128';
+      context.lineWidth = Math.max(2, size * 0.035);
+      traceBulb(1.5, -1);
+      context.stroke();
+      traceBulbBase(1.5, -1);
       context.stroke();
       context.restore();
+    }
+
+    function drawPauseIcon(context, centerX, centerY, size, disabled) {
+      const barWidth = size * 0.22;
+      const barHeight = size * 0.62;
+      const gap = size * 0.12;
+      const top = centerY - barHeight / 2;
+      const leftBarX = centerX - gap / 2 - barWidth;
+      const rightBarX = centerX + gap / 2;
+
+      function traceBar(x, direction, offsetX = 0, offsetY = 0) {
+        const lean = size * 0.035 * direction;
+        context.beginPath();
+        context.moveTo(x + lean + offsetX, top + offsetY);
+        context.lineTo(x + barWidth + offsetX, top + size * 0.02 + offsetY);
+        context.lineTo(
+          x + barWidth - lean + offsetX,
+          top + barHeight + offsetY
+        );
+        context.lineTo(x + offsetX, top + barHeight - size * 0.015 + offsetY);
+        context.closePath();
+      }
+
+      context.save();
+      context.lineJoin = 'round';
+      context.fillStyle = disabled ? '#9d9d86' : '#fff6b3';
+      context.shadowColor = disabled
+        ? 'transparent'
+        : 'rgba(255, 214, 72, 0.62)';
+      context.shadowBlur = disabled ? 0 : 10;
+      traceBar(leftBarX, 1);
+      context.fill();
+      traceBar(rightBarX, -1);
+      context.fill();
+
+      context.globalAlpha = 0.32;
+      context.shadowBlur = 0;
+      context.strokeStyle = disabled ? '#646057' : '#5e4128';
+      context.lineWidth = Math.max(2, size * 0.035);
+      traceBar(leftBarX, 1, 1.5, -1);
+      context.stroke();
+      traceBar(rightBarX, -1, 1.5, -1);
+      context.stroke();
+      context.restore();
+    }
+
+    function drawHintTutorial(gameNow) {
+      if (!isHintTutorialVisible(gameNow)) {
+        return;
+      }
+
+      const rect = HINT_TUTORIAL_PANEL_RECT;
+      const pulse = 0.5 + 0.5 * Math.sin(
+        gameNow / HINT_TUTORIAL_PULSE_PERIOD_MS * Math.PI * 2
+      );
+
+      hudCtx.save();
+      hudCtx.globalAlpha = 0.9 + pulse * 0.1;
+      drawRoundedRect(
+        hudCtx,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        28
+      );
+      hudCtx.fillStyle = 'rgba(18, 23, 21, 0.82)';
+      hudCtx.fill();
+      hudCtx.lineWidth = 3;
+      hudCtx.strokeStyle = `rgba(255, 243, 108, ${0.58 + pulse * 0.3})`;
+      hudCtx.stroke();
+
+      hudCtx.beginPath();
+      hudCtx.moveTo(rect.x, rect.y + rect.height * 0.38);
+      hudCtx.lineTo(rect.x - 22, rect.y + rect.height * 0.52);
+      hudCtx.lineTo(rect.x, rect.y + rect.height * 0.66);
+      hudCtx.closePath();
+      hudCtx.fillStyle = 'rgba(18, 23, 21, 0.82)';
+      hudCtx.fill();
+
+      const lineOne = 'Не можете найти грушу?';
+      const lineTwo = 'Нажмите на лампочку';
+      const tutorialTextWidth = rect.width - 38;
+      setFittedSketchFont(
+        hudCtx,
+        lineOne,
+        tutorialTextWidth,
+        32,
+        24,
+        700
+      );
+      const lineOneFont = hudCtx.font;
+      setFittedSketchFont(
+        hudCtx,
+        lineTwo,
+        tutorialTextWidth,
+        32,
+        24,
+        700
+      );
+      const lineTwoFont = hudCtx.font;
+      hudCtx.textAlign = 'center';
+      hudCtx.textBaseline = 'middle';
+      hudCtx.lineWidth = 6;
+      hudCtx.strokeStyle = 'rgba(0, 0, 0, 0.68)';
+      const textX = rect.x + rect.width / 2;
+      hudCtx.font = lineOneFont;
+      hudCtx.strokeText(lineOne, textX, rect.y + 31);
+      hudCtx.fillStyle = '#fff6b3';
+      hudCtx.fillText(lineOne, textX, rect.y + 31);
+      hudCtx.font = lineTwoFont;
+      hudCtx.strokeStyle = 'rgba(0, 0, 0, 0.68)';
+      hudCtx.strokeText(lineTwo, textX, rect.y + 66);
+      hudCtx.fillStyle = '#fff6b3';
+      hudCtx.fillText(lineTwo, textX, rect.y + 66);
+      hudCtx.restore();
+    }
+
+    function drawPlayIcon(context, centerX, centerY, size) {
+      context.save();
+      context.fillStyle = '#fff6b3';
+      context.strokeStyle = 'rgba(70, 45, 29, 0.62)';
+      context.lineWidth = 2.5;
+      context.lineJoin = 'round';
+      context.beginPath();
+      context.moveTo(centerX - size * 0.3, centerY - size * 0.42);
+      context.lineTo(centerX + size * 0.42, centerY);
+      context.lineTo(centerX - size * 0.3, centerY + size * 0.42);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.restore();
+    }
+
+    function drawPauseMenuButton(
+      rect,
+      label,
+      danger = false,
+      icon = null,
+      disabled = false
+    ) {
+      ctx.save();
+      drawSketchButtonFrame(
+        ctx,
+        rect,
+        disabled
+          ? 'rgba(42, 39, 34, 0.58)'
+          : danger
+            ? 'rgba(111, 35, 35, 0.78)'
+            : 'rgba(48, 40, 31, 0.84)',
+        disabled
+          ? 'rgba(177, 171, 145, 0.4)'
+          : danger
+            ? 'rgba(255, 160, 148, 0.82)'
+            : 'rgba(255, 237, 168, 0.76)',
+        25
+      );
+      const iconSpace = icon ? 64 : 0;
+      const textCenterX = rect.x + rect.width / 2 + iconSpace * 0.18;
+      setFittedSketchFont(
+        ctx,
+        label,
+        rect.width - 54 - iconSpace,
+        40,
+        29,
+        700
+      );
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.strokeText(label, textCenterX, rect.y + rect.height / 2 + 1);
+      ctx.fillStyle = disabled
+        ? 'rgba(220, 215, 190, 0.62)'
+        : danger
+          ? '#ffd0c7'
+          : '#fff6b3';
+      ctx.fillText(label, textCenterX, rect.y + rect.height / 2 + 1);
+
+      if (icon === 'play') {
+        drawPlayIcon(
+          ctx,
+          rect.x + 74,
+          rect.y + rect.height / 2,
+          38
+        );
+      }
+      ctx.restore();
+    }
+
+    function drawPauseOverlay(realNow) {
+      const panel = PAUSE_PANEL_RECT;
+      const confirmingExit = realNow < pauseExitConfirmUntil;
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.66)';
+      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+
+      drawRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 40);
+      ctx.fillStyle = 'rgba(20, 24, 23, 0.9)';
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255, 244, 170, 0.68)';
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      setFittedSketchFont(
+        ctx,
+        'ПАУЗА',
+        panel.width - 120,
+        75,
+        54,
+        700
+      );
+      ctx.lineWidth = 9;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.strokeText('ПАУЗА', LOGICAL_WIDTH / 2, panel.y + 96);
+      ctx.fillStyle = '#fff6b3';
+      ctx.fillText('ПАУЗА', LOGICAL_WIDTH / 2, panel.y + 96);
+
+      const pauseDescription =
+        'Раунд, таймер и игровые эффекты остановлены';
+      setFittedSketchFont(
+        ctx,
+        pauseDescription,
+        panel.width - 90,
+        34,
+        25,
+        600
+      );
+      ctx.lineWidth = 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.fillText(
+        pauseDescription,
+        LOGICAL_WIDTH / 2,
+        panel.y + 158
+      );
+
+      drawPauseMenuButton(
+        PAUSE_CONTINUE_RECT,
+        'Продолжить',
+        false,
+        'play'
+      );
+      drawPauseMenuButton(
+        PAUSE_SOUND_RECT,
+        audioController.isEffectivelyMuted
+          ? 'Звук: выключен'
+          : `Звук: ${Math.round(audioController.globalVolume * 100)}%`
+      );
+      drawPauseMenuButton(
+        PAUSE_CLEAN_HUD_RECT,
+        cleanHudEnabled
+          ? 'Чистый экран: включён'
+          : 'Чистый экран: выключен'
+      );
+      drawPauseMenuButton(
+        PAUSE_FULLSCREEN_RECT,
+        fullscreenRequestInProgress
+          ? 'Переключение экрана...'
+          : fullscreenSupported()
+            ? isFullscreenActive()
+              ? 'Выйти из полного экрана'
+              : 'Во весь экран'
+            : 'Полный экран недоступен',
+        false,
+        null,
+        !fullscreenSupported() || fullscreenRequestInProgress
+      );
+      drawPauseMenuButton(
+        PAUSE_EXIT_RECT,
+        confirmingExit ? 'Точно выйти?' : 'Выйти в меню',
+        true
+      );
+
+      if (confirmingExit) {
+        const exitConfirmText =
+          'Нажмите ещё раз в течение двух секунд';
+        setFittedSketchFont(
+          ctx,
+          exitConfirmText,
+          panel.width - 100,
+          29,
+          23,
+          600
+        );
+        ctx.fillStyle = 'rgba(255, 214, 205, 0.86)';
+        ctx.fillText(
+          exitConfirmText,
+          LOGICAL_WIDTH / 2,
+          panel.y + panel.height - 54
+        );
+      }
+
+      ctx.restore();
     }
 
     function drawGameControlButtons(now) {
@@ -2986,28 +4288,46 @@
         return;
       }
 
+      if (cleanHudEnabled) {
+        drawHudRestoreTab(now);
+        return;
+      }
+
       const hintDisabled = victoryPending || now < hintCooldownUntil;
+      const tutorialVisible = isHintTutorialVisible(now);
       const rect = HINT_BUTTON_RECT;
 
-      hudCtx.save();
-      drawRoundedRect(
+      if (tutorialVisible) {
+        const pulse = 0.5 + 0.5 * Math.sin(
+          now / HINT_TUTORIAL_PULSE_PERIOD_MS * Math.PI * 2
+        );
+        hudCtx.save();
+        hudCtx.globalAlpha = 0.32 + pulse * 0.34;
+        hudCtx.shadowColor = '#fff36c';
+        hudCtx.shadowBlur = 26 + pulse * 18;
+        drawRoundedRect(
+          hudCtx,
+          rect.x - 10 - pulse * 4,
+          rect.y - 10 - pulse * 4,
+          rect.width + 20 + pulse * 8,
+          rect.height + 20 + pulse * 8,
+          32
+        );
+        hudCtx.fillStyle = '#fff36c';
+        hudCtx.fill();
+        hudCtx.restore();
+      }
+
+      drawSketchButtonFrame(
         hudCtx,
-        rect.x,
-        rect.y,
-        rect.width,
-        rect.height,
-        26
+        rect,
+        hintDisabled
+          ? 'rgba(39, 32, 25, 0.46)'
+          : 'rgba(39, 32, 25, 0.64)',
+        hintDisabled
+          ? 'rgba(190, 184, 157, 0.42)'
+          : 'rgba(255, 237, 168, 0.78)'
       );
-      hudCtx.fillStyle = hintDisabled
-        ? 'rgba(18, 23, 21, 0.52)'
-        : 'rgba(18, 23, 21, 0.68)';
-      hudCtx.fill();
-      hudCtx.lineWidth = 3;
-      hudCtx.strokeStyle = hintDisabled
-        ? 'rgba(190, 190, 175, 0.4)'
-        : 'rgba(255, 245, 166, 0.72)';
-      hudCtx.stroke();
-      hudCtx.restore();
 
       drawBulbIcon(
         hudCtx,
@@ -3018,7 +4338,6 @@
       );
 
       if (now < hintCooldownUntil) {
-        const rect = HINT_BUTTON_RECT;
         const remaining = hintCooldownUntil - now;
         const ratio = clamp(remaining / HINT_COOLDOWN_MS, 0, 1);
         const overlayHeight = rect.height * ratio;
@@ -3034,7 +4353,7 @@
         );
         hudCtx.fillStyle = 'rgba(5, 8, 8, 0.58)';
         hudCtx.fill();
-        hudCtx.font = '900 27px Arial, Helvetica, sans-serif';
+        setSketchFont(hudCtx, 33, 700);
         hudCtx.textAlign = 'center';
         hudCtx.textBaseline = 'middle';
         hudCtx.fillStyle = '#ffffff';
@@ -3053,9 +4372,98 @@
         );
         hudCtx.restore();
       }
+
+      const pauseRect = PAUSE_BUTTON_RECT;
+      const pauseDisabled = victoryPending;
+      drawSketchButtonFrame(
+        hudCtx,
+        pauseRect,
+        pauseDisabled
+          ? 'rgba(39, 32, 25, 0.44)'
+          : 'rgba(39, 32, 25, 0.64)',
+        pauseDisabled
+          ? 'rgba(190, 184, 157, 0.4)'
+          : 'rgba(255, 237, 168, 0.78)'
+      );
+      drawPauseIcon(
+        hudCtx,
+        pauseRect.x + pauseRect.width / 2,
+        pauseRect.y + pauseRect.height / 2,
+        72,
+        pauseDisabled
+      );
+
+      drawHintTutorial(now);
     }
 
-    function drawAudioHud(now) {
+    function getAudioHudSignature(realNow, gameNow) {
+      const hintSeconds = state === STATE_GAME &&
+        !cleanHudEnabled &&
+        gameNow < hintCooldownUntil
+        ? Math.ceil((hintCooldownUntil - gameNow) / 1000)
+        : 0;
+      const tutorialVisible = isHintTutorialVisible(gameNow);
+
+      return [
+        state,
+        assetsReady ? 1 : 0,
+        isPreloading ? 1 : 0,
+        loadedAssets,
+        loadErrors.length,
+        bestTime ?? '',
+        audioController.isEffectivelyMuted ? 1 : 0,
+        audioController.globalVolume.toFixed(2),
+        mobileOrientationButtonAvailable() ? 1 : 0,
+        requestedOrientation ?? 'auto',
+        surfaceLayout.quarterTurn ? 1 : 0,
+        orientationRequestInProgress ? 1 : 0,
+        fullscreenSupported() ? 1 : 0,
+        isFullscreenActive() ? 1 : 0,
+        fullscreenRequestInProgress ? 1 : 0,
+        cleanHudEnabled ? 1 : 0,
+        cleanHudEnabled &&
+          gameNow - cleanHudEnabledAt < HUD_RESTORE_EMPHASIS_DURATION
+          ? 1
+          : 0,
+        realNow < uiNoticeVisibleUntil ? uiNoticeText : '',
+        sketchFontReady ? 1 : 0,
+        hintSeconds,
+        tutorialVisible ? 1 : 0,
+        victoryPending ? 1 : 0,
+        realNow < volumeHudVisibleUntil ? 1 : 0
+      ].join('|');
+    }
+
+    function drawAudioHud(realNow, gameNow = getGameNow(realNow)) {
+      const popupActive = realNow < volumeHudVisibleUntil;
+      const noticeActive = Boolean(uiNoticeText) &&
+        realNow < uiNoticeVisibleUntil;
+      const restoreTabAnimationActive = state === STATE_GAME &&
+        cleanHudEnabled &&
+        gameNow - cleanHudEnabledAt < HUD_RESTORE_EMPHASIS_DURATION;
+      const hintAnimationActive = state === STATE_GAME &&
+        !cleanHudEnabled && (
+          gameNow < hintCooldownUntil ||
+          isHintTutorialVisible(gameNow)
+        );
+      const signature = getAudioHudSignature(realNow, gameNow);
+      const animationInterval =
+        popupActive || noticeActive || hintAnimationActive ||
+        restoreTabAnimationActive
+          ? 34
+          : 100;
+      const hasAnimation =
+        popupActive || noticeActive || hintAnimationActive ||
+        restoreTabAnimationActive;
+
+      if (
+        !forceHudRedraw &&
+        signature === lastHudSignature &&
+        (!hasAnimation || realNow - lastHudRenderAt < animationInterval)
+      ) {
+        return;
+      }
+
       hudCtx.save();
       hudCtx.setTransform(1, 0, 0, 1, 0, 0);
       hudCtx.clearRect(0, 0, audioHudCanvas.width, audioHudCanvas.height);
@@ -3063,10 +4471,17 @@
 
       if (state === STATE_START) {
         drawMuteButton();
+        drawOrientationButton();
+        drawFullscreenButton();
       }
-      drawGameControlButtons(now);
+      drawGameControlButtons(gameNow);
       drawStartBestTime();
-      drawVolumePopup(now);
+      drawVolumePopup(realNow);
+      drawUiNotice(realNow);
+
+      lastHudRenderAt = realNow;
+      lastHudSignature = signature;
+      forceHudRedraw = false;
     }
 
     function pointIsInsideMuteButton(point) {
@@ -3080,6 +4495,86 @@
         point.y >= MUTE_BUTTON_HIT_RECT.y &&
         point.y <= MUTE_BUTTON_HIT_RECT.y + MUTE_BUTTON_HIT_RECT.height
       );
+    }
+
+    function pointIsInsideOrientationButton(point) {
+      if (state !== STATE_START || !mobileOrientationButtonAvailable()) {
+        return false;
+      }
+
+      return pointIsInsideRect(point, ORIENTATION_BUTTON_HIT_RECT);
+    }
+
+    function pointIsInsideFullscreenButton(point) {
+      if (
+        state !== STATE_START ||
+        !fullscreenSupported() ||
+        fullscreenRequestInProgress
+      ) {
+        return false;
+      }
+
+      return pointIsInsideRect(point, getStartFullscreenButtonHitRect());
+    }
+
+    function pointIsInsideHudRestoreTab(point) {
+      return state === STATE_GAME &&
+        cleanHudEnabled &&
+        pointIsInsideRect(point, HUD_RESTORE_TAB_HIT_RECT);
+    }
+
+    function toggleCleanHud() {
+      if (state !== STATE_GAME && state !== STATE_PAUSE) {
+        return;
+      }
+
+      cleanHudEnabled = !cleanHudEnabled;
+      cleanHudEnabledAt = cleanHudEnabled ? getGameNow() : 0;
+      pauseExitConfirmUntil = 0;
+      audioController.playSfx('button');
+      forceHudRedraw = true;
+    }
+
+    async function requestOrientation(targetOrientation) {
+      if (orientationRequestInProgress) {
+        return;
+      }
+
+      orientationRequestInProgress = true;
+      requestedOrientation = targetOrientation;
+      forceHudRedraw = true;
+      resizeCanvas();
+
+      try {
+        if (!isFullscreenActive() && fullscreenSupported()) {
+          await setFullscreenActive(true, {
+            playSound: false,
+            notifyOnFailure: false
+          });
+        }
+
+        if (
+          window.screen.orientation &&
+          typeof window.screen.orientation.lock === 'function'
+        ) {
+          try {
+            await window.screen.orientation.lock(targetOrientation);
+          } catch {
+            // CSS-поворот ниже остаётся рабочим fallback.
+          }
+        }
+      } finally {
+        orientationRequestInProgress = false;
+        forceHudRedraw = true;
+        resizeCanvas();
+      }
+    }
+
+    function toggleOrientation() {
+      const current = selectedOrientation();
+      const target = current === 'landscape' ? 'portrait' : 'landscape';
+      audioController.playSfx('button');
+      void requestOrientation(target);
     }
 
     function pointIsInsideRect(point, rect) {
@@ -3109,6 +4604,7 @@
       const selected = available[
         Math.floor(Math.random() * available.length)
       ];
+      dismissHintTutorial();
       hintedPearId = selected.id;
       hintEffectUntil = now + HINT_EFFECT_DURATION;
       hintCooldownUntil = now + HINT_COOLDOWN_MS;
@@ -3116,118 +4612,6 @@
       penaltyMilliseconds = 0;
       penaltyTexts = [];
       audioController.playSfx('button');
-    }
-
-    function drawRestartSpinner(now, alpha) {
-      const centerX = LOGICAL_WIDTH / 2;
-      const centerY = LOGICAL_HEIGHT / 2 - 26;
-      const radius = 54;
-      const rotation = (now / 620) * Math.PI * 2;
-
-      ctx.save();
-      ctx.globalAlpha = clamp(alpha, 0, 1);
-      ctx.translate(centerX, centerY);
-      ctx.rotate(rotation);
-      ctx.lineWidth = 12;
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = '#fff1a1';
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, -Math.PI * 0.15, Math.PI * 1.42);
-      ctx.stroke();
-
-      ctx.fillStyle = '#fff1a1';
-      ctx.beginPath();
-      ctx.moveTo(-radius - 2, -18);
-      ctx.lineTo(-radius + 25, -11);
-      ctx.lineTo(-radius + 9, 14);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-
-    function drawRestartCover(now) {
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#242016';
-      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-
-      const failed = Boolean(restartFailureMessage);
-
-      if (!failed) {
-        drawRestartSpinner(now, 1);
-      }
-
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '800 42px Arial, Helvetica, sans-serif';
-      ctx.lineWidth = 7;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
-      ctx.fillStyle = failed ? '#ffcfb0' : '#fff3b2';
-
-      const message = failed
-        ? restartFailureMessage
-        : 'Перемешиваем груши…';
-
-      ctx.strokeText(
-        message,
-        LOGICAL_WIDTH / 2,
-        LOGICAL_HEIGHT / 2 + 70
-      );
-      ctx.fillText(
-        message,
-        LOGICAL_WIDTH / 2,
-        LOGICAL_HEIGHT / 2 + 70
-      );
-
-      if (failed) {
-        ctx.font = '600 28px Arial, Helvetica, sans-serif';
-        ctx.lineWidth = 5;
-        ctx.fillStyle = '#fff3dc';
-        ctx.strokeText(
-          'Возвращаем прежний раунд',
-          LOGICAL_WIDTH / 2,
-          LOGICAL_HEIGHT / 2 + 126
-        );
-        ctx.fillText(
-          'Возвращаем прежний раунд',
-          LOGICAL_WIDTH / 2,
-          LOGICAL_HEIGHT / 2 + 126
-        );
-      }
-
-      ctx.restore();
-    }
-
-    function drawRestartTransition(now) {
-      // В каждом кадре перезапуска сначала рисуется полностью непрозрачный
-      // экран. Никакой старой или новой раскладки под полупрозрачным слоем нет.
-      drawRestartCover(now);
-
-      if (!restartCoverPresented) {
-        // Генерация начнётся лишь в следующем RAF. К этому моменту браузер уже
-        // успеет физически показать пользователю текущий непрозрачный кадр.
-        restartCoverPresented = true;
-        return;
-      }
-
-      if (restartFailureMessage) {
-        if (now >= restartFailureReturnAt) {
-          abortRestartTransition(now);
-        }
-        return;
-      }
-
-      if (!restartLayoutPrepared) {
-        prepareRestartLayout(now);
-        return;
-      }
-
-      if (now >= restartRevealAt) {
-        // Открываем новую сцену мгновенным срезом на следующем кадре. Fade-in
-        // намеренно отсутствует: он сам подсвечивал бы момент появления груш.
-        finishRestartTransition(now);
-      }
     }
 
     function drawLoadingScreen() {
@@ -3292,51 +4676,71 @@
       ctx.restore();
     }
 
-    function render(now) {
+    function render(realNow) {
+      const gameNow = getGameNow(realNow);
       syncStartScreenVisibility();
 
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-
       if (!assetsReady) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
         drawLoadingScreen();
-        drawAudioHud(now);
+        drawAudioHud(realNow, gameNow);
         requestAnimationFrame(render);
         return;
+      }
+
+      if (state === STATE_START) {
+        if (!startBackdropPrepared) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+          startBackdropPrepared = true;
+        }
+      } else {
+        startBackdropPrepared = false;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
       }
 
       switch (state) {
         case STATE_START:
           // GIF/PNG отображается HTML-элементом поверх Canvas.
-          // Браузер сам декодирует и воспроизводит анимированный GIF.
           break;
 
         case STATE_GAME:
           drawBackground(images.level);
 
           for (const pear of pears) {
-            drawPear(pear, now);
+            drawPear(pear, gameNow);
           }
 
-          drawEffects(now);
-          drawPenaltyTexts(now);
-          drawGameHud(now);
+          drawEffects(gameNow);
+          drawPenaltyTexts(gameNow);
+          drawGameHud(gameNow);
 
-          if (hintedPearId !== null && now >= hintEffectUntil) {
+          if (hintedPearId !== null && gameNow >= hintEffectUntil) {
             hintedPearId = null;
           }
 
-          if (victoryPending && now >= victoryTransitionAt) {
-            completeVictoryTransition();
+          if (victoryPending && gameNow >= victoryTransitionAt) {
+            completeVictoryTransition(realNow);
           }
           break;
 
-        case STATE_RESTARTING:
-          drawRestartTransition(now);
+        case STATE_PAUSE:
+          drawBackground(images.level);
+
+          for (const pear of pears) {
+            drawPear(pear, gameNow);
+          }
+
+          drawEffects(gameNow);
+          drawPenaltyTexts(gameNow);
+          drawGameHud(gameNow);
+          drawPauseOverlay(realNow);
           break;
 
         case STATE_END:
-          drawVictoryScreen(now);
+          drawVictoryScreen(realNow);
           break;
 
         default:
@@ -3344,7 +4748,7 @@
           break;
       }
 
-      drawAudioHud(now);
+      drawAudioHud(realNow, gameNow);
       requestAnimationFrame(render);
     }
 
@@ -3449,7 +4853,7 @@
         return;
       }
 
-      const now = performance.now();
+      const now = getGameNow();
       const pear = findHitPear(point, now, false);
 
       if (!pear) {
@@ -3488,8 +4892,18 @@
     }
 
     function handleGlobalPointerDown(event) {
-      if (event.isPrimary !== false) {
-        audioController.unlock();
+      if (event.isPrimary === false) {
+        return;
+      }
+
+      audioController.unlock();
+
+      if (state === STATE_GAME) {
+        const gameNow = getGameNow();
+
+        if (isHintTutorialVisible(gameNow)) {
+          dismissHintTutorial();
+        }
       }
     }
 
@@ -3507,19 +4921,104 @@
         return;
       }
 
-      if (state === STATE_GAME && point) {
-        const now = performance.now();
+      if (point && pointIsInsideOrientationButton(point)) {
+        toggleOrientation();
+        return;
+      }
 
-        if (pointIsInsideRect(point, HINT_BUTTON_HIT_RECT)) {
-          useHint(now);
+      if (point && pointIsInsideFullscreenButton(point)) {
+        void toggleFullscreen();
+        return;
+      }
+
+      if (state === STATE_PAUSE) {
+        if (!point) {
+          pauseExitConfirmUntil = 0;
           return;
         }
 
+        const realNow = performance.now();
+
+        if (pointIsInsideRect(point, PAUSE_CONTINUE_RECT)) {
+          resumeFromPause(realNow);
+          return;
+        }
+
+        if (pointIsInsideRect(point, PAUSE_SOUND_RECT)) {
+          pauseExitConfirmUntil = 0;
+          audioController.toggleMute();
+          volumeHudVisibleUntil = 0;
+          forceHudRedraw = true;
+          return;
+        }
+
+        if (pointIsInsideRect(point, PAUSE_CLEAN_HUD_RECT)) {
+          toggleCleanHud();
+          return;
+        }
+
+        if (pointIsInsideRect(point, PAUSE_FULLSCREEN_RECT)) {
+          pauseExitConfirmUntil = 0;
+
+          if (fullscreenSupported() && !fullscreenRequestInProgress) {
+            void toggleFullscreen();
+          }
+          return;
+        }
+
+        if (pointIsInsideRect(point, PAUSE_EXIT_RECT)) {
+          if (realNow < pauseExitConfirmUntil) {
+            audioController.playSfx('button');
+            returnToStart();
+          } else {
+            pauseExitConfirmUntil = realNow + PAUSE_EXIT_CONFIRM_MS;
+            audioController.playSfx('button');
+          }
+          return;
+        }
+
+        pauseExitConfirmUntil = 0;
+        return;
+      }
+
+      if (state === STATE_GAME && point) {
+        const now = getGameNow();
+
+        if (pointIsInsideHudRestoreTab(point)) {
+          toggleCleanHud();
+          return;
+        }
+
+        if (!cleanHudEnabled) {
+          if (isHintTutorialVisible(now)) {
+            dismissHintTutorial();
+          }
+
+          if (pointIsInsideRect(point, PAUSE_BUTTON_HIT_RECT)) {
+            enterPause(performance.now());
+            return;
+          }
+
+          if (pointIsInsideRect(point, HINT_BUTTON_HIT_RECT)) {
+            useHint(now);
+            return;
+          }
+        }
+
+        const pearUnderPointer =
+          findHitPear(point, now, false) ||
+          findHitPear(point, now, true);
+
+        if (pearUnderPointer) {
+          activateCurrentState(event.clientX, event.clientY);
+          return;
+        }
       }
 
       const isTouchLike = event.pointerType === 'touch' || event.pointerType === 'pen';
-      const isInVolumeZone = point &&
-        point.x <= LOGICAL_WIDTH * VOLUME_SWIPE_ZONE_RATIO;
+      const isInVolumeZone = state === STATE_GAME && point &&
+        point.x <= LOGICAL_WIDTH * VOLUME_SWIPE_ZONE_RATIO &&
+        point.y >= VOLUME_SWIPE_MIN_LOGICAL_Y;
 
       if (isTouchLike && isInVolumeZone) {
         volumeGesture = {
@@ -3581,6 +5080,7 @@
 
       audioController.setGlobalVolume(
         volumeGesture.startVolume + delta,
+        true,
         true
       );
     }
@@ -3624,11 +5124,36 @@
     }
 
     function handleKeyDown(event) {
+      if (event.code === 'KeyH') {
+        if (state === STATE_GAME || state === STATE_PAUSE) {
+          event.preventDefault();
+          toggleCleanHud();
+        }
+        return;
+      }
+
+      if (event.code === 'Escape') {
+        if (state === STATE_GAME && !victoryPending) {
+          event.preventDefault();
+          enterPause(performance.now());
+        } else if (state === STATE_PAUSE) {
+          event.preventDefault();
+          resumeFromPause(performance.now());
+        }
+        return;
+      }
+
       if (event.code !== 'Enter' && event.code !== 'Space') {
         return;
       }
 
       audioController.unlock();
+
+      if (state === STATE_PAUSE) {
+        event.preventDefault();
+        resumeFromPause(performance.now());
+        return;
+      }
 
       if (retryPreloadIfNeeded()) {
         event.preventDefault();
@@ -3650,41 +5175,31 @@
     }
 
     function handleVisibilityChange() {
-      const now = performance.now();
+      const realNow = performance.now();
 
       if (document.hidden) {
         if (pageHiddenAt <= 0) {
-          pageHiddenAt = now;
+          pageHiddenAt = realNow;
+        }
+
+        if (state === STATE_GAME || state === STATE_PAUSE) {
+          pauseGameClock('visibility', realNow);
         }
 
         audioController.suspendForPageHide();
         return;
       }
 
+      if (state === STATE_GAME || state === STATE_PAUSE) {
+        resumeGameClock('visibility', realNow);
+      }
+
       if (pageHiddenAt > 0) {
         const hiddenAt = pageHiddenAt;
-        const pauseDuration = Math.max(0, now - hiddenAt);
+        const pauseDuration = Math.max(0, realNow - hiddenAt);
         pageHiddenAt = 0;
 
-        if (state === STATE_RESTARTING && pauseDuration > 0) {
-          if (restartTransitionStartedAt > 0) {
-            restartTransitionStartedAt += pauseDuration;
-          }
-
-          if (restartPausedRoundAt > 0) {
-            restartPausedRoundAt += pauseDuration;
-          }
-
-          if (restartRevealAt > hiddenAt) {
-            restartRevealAt += pauseDuration;
-          }
-
-          if (restartFailureReturnAt > hiddenAt) {
-            restartFailureReturnAt += pauseDuration;
-          }
-        } else if (state === STATE_GAME && pauseDuration > 0) {
-          shiftActiveRoundTimestamps(hiddenAt, pauseDuration);
-        } else if (state === STATE_END && pauseDuration > 0) {
+        if (state === STATE_END && pauseDuration > 0) {
           celebrationStartedAt += pauseDuration;
 
           for (const ring of celebrationRings) {
@@ -3695,10 +5210,11 @@
             particle.createdAt += pauseDuration;
           }
 
-          nextFireworkAt = now + FIREWORK_RESUME_DELAY;
+          nextFireworkAt = realNow + FIREWORK_RESUME_DELAY;
         }
       }
 
+      forceHudRedraw = true;
       audioController.resumeAfterPageShow();
     }
 
@@ -3729,11 +5245,53 @@
 
     window.addEventListener('keydown', handleKeyDown);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    if (
+      document.fonts &&
+      typeof document.fonts.addEventListener === 'function'
+    ) {
+      document.fonts.addEventListener('loadingdone', handleFontLoadingDone);
+    }
+
     canvas.addEventListener('contextmenu', preventDefault);
     canvas.addEventListener('dragstart', preventDefault);
 
+    function handleFullscreenChange() {
+      fullscreenRequestInProgress = false;
+      forceHudRedraw = true;
+      resizeCanvas();
+    }
+
+    function handleFullscreenError() {
+      fullscreenRequestInProgress = false;
+      showUiNotice('Браузер не разрешил изменить полноэкранный режим');
+      forceHudRedraw = true;
+      resizeCanvas();
+    }
+
     window.addEventListener('resize', resizeCanvas, { passive: true });
     window.addEventListener('orientationchange', resizeCanvas, { passive: true });
+    document.addEventListener('fullscreenchange', handleFullscreenChange, {
+      passive: true
+    });
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange, {
+      passive: true
+    });
+    document.addEventListener('fullscreenerror', handleFullscreenError, {
+      passive: true
+    });
+    document.addEventListener('webkitfullscreenerror', handleFullscreenError, {
+      passive: true
+    });
+
+    if (
+      window.screen.orientation &&
+      typeof window.screen.orientation.addEventListener === 'function'
+    ) {
+      window.screen.orientation.addEventListener('change', resizeCanvas, {
+        passive: true
+      });
+    }
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', resizeCanvas, {
@@ -3747,6 +5305,7 @@
     resizeCanvas();
     audioController.initialize();
     audioController.enterStart();
+    prepareGameFont();
     preloadAssets();
     requestAnimationFrame(render);
   </script>
